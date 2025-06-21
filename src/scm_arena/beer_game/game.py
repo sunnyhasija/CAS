@@ -1,8 +1,8 @@
 """
-Beer Game simulation engine with standard academic cost structure.
+Beer Game simulation engine with FIXED modern mode logic.
 
-This module implements the core Beer Game logic with the traditional
-$1 holding cost : $2 backorder cost ratio from academic literature.
+CRITICAL BUG FIX: Modern mode now properly propagates actual orders 
+instead of fulfilled amounts, ensuring fair comparison with classic mode.
 """
 
 from dataclasses import dataclass
@@ -193,6 +193,8 @@ class BeerGame:
     - Backorder cost: $2 per unit per period
     
     Supports multiple information visibility levels for research.
+    
+    FIXED: Modern mode now properly propagates actual orders instead of fulfilled amounts.
     """
     
     def __init__(
@@ -311,7 +313,12 @@ class BeerGame:
             player.shipping_delay_2 = 0  # Will be filled by upstream orders
     
     def _fill_orders(self, customer_demand: int):
-        """Fill orders from downstream and update backlogs"""
+        """
+        Fill orders from downstream and update backlogs.
+        
+        CRITICAL BUG FIX: Modern mode now properly propagates actual orders
+        instead of fulfilled amounts to ensure fair comparison with classic mode.
+        """
         # Start with customer demand at retailer
         demand = customer_demand
         
@@ -331,14 +338,14 @@ class BeerGame:
             # Update backlog
             player.backlog = total_demand - fulfilled
             
-            # Demand for next upstream position = what we fulfilled
-            # (In classic mode, use delayed information)
+            # FIXED: Demand propagation logic
             if self.classic_mode and position != Position.RETAILER:
-                # Use order from 2 periods ago
+                # Classic mode: Use historical order information (delayed but accurate)
                 demand = player.order_delay_2
             else:
-                # Modern mode: use current fulfilled amount as next demand
-                demand = fulfilled
+                # FIXED Modern mode: Use actual incoming order, NOT fulfilled amount
+                # This preserves demand signal integrity through the supply chain
+                demand = player.incoming_order
     
     def _get_agent_decisions(self) -> Dict[Position, int]:
         """Get ordering decisions from all agents"""
@@ -373,7 +380,7 @@ class BeerGame:
             player.decision_history.append(decision)
             player.outgoing_order = decision
             
-            # Advance order pipeline
+            # Advance order pipeline for classic mode delays
             player.order_delay_2 = player.order_delay_1
             player.order_delay_1 = decision
             
@@ -381,10 +388,18 @@ class BeerGame:
             upstream_pos = position.get_upstream_position()
             if upstream_pos:
                 upstream_player = self.current_state.players[upstream_pos]
-                upstream_player.shipping_delay_2 = decision
+                if self.classic_mode:
+                    # Classic mode: 2-period shipping delay
+                    upstream_player.shipping_delay_2 = decision
+                else:
+                    # Modern mode: 1-period shipping delay
+                    upstream_player.shipping_delay_1 = decision
             # Manufacturer has infinite supply
             elif position == Position.MANUFACTURER:
-                player.shipping_delay_2 = decision
+                if self.classic_mode:
+                    player.shipping_delay_2 = decision
+                else:
+                    player.shipping_delay_1 = decision
     
     def _calculate_costs(self):
         """Calculate costs for this round"""
@@ -507,7 +522,7 @@ def create_modern_beer_game(
     """
     Create Beer Game with modern settings.
     
-    - Instant information flow
+    - Instant information flow (FIXED: now preserves actual orders)
     - 1-period shipping delays
     - $1 holding : $2 backorder costs
     """

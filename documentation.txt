@@ -131,7 +131,7 @@ SCM-Arena is the **world's first standardized benchmark** for evaluating Large L
 
 ### Project Structure
 ```
-scm-arena/
+CAS/
 ├── pyproject.toml              # Poetry dependencies & config
 ├── src/
 │   ├── scm_arena/
@@ -390,8 +390,8 @@ Jupyter (analysis notebooks)
 ### **Quick Installation**
 ```bash
 # 1. Clone repository
-git clone https://github.com/your-org/scm-arena
-cd scm-arena
+git clone https://github.com/sunnyhasija/CAS
+cd CAS
 
 # 2. Install dependencies
 poetry install
@@ -454,7 +454,7 @@ GROUP BY position;
 
 **Current Status**: Production-ready with llama3.2 baseline established. Ready for multi-model evaluation and research collaborations.
 
-**Contact**: [To be updated with actual contact information]
+**Repository**: [https://github.com/sunnyhasija/CAS](https://github.com/sunnyhasija/CAS)
 
 ---
 **Last Updated**: Current implementation with complete experimental framework and initial baseline results
