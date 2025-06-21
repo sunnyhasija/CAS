@@ -1,8 +1,8 @@
 """
-Enhanced command-line interface for SCM-Arena with fully crossed experimental designs.
+Enhanced command-line interface for SCM-Arena with canonical LLM settings.
 
-Provides commands for systematic evaluation across all experimental dimensions:
-- Models, Memory, Prompts, Visibility, Scenarios, Game Modes
+MAJOR UPDATE: Implements canonical benchmark settings (temperature=0.3, top_p=0.9)
+for consistent, reproducible evaluation across all models and research groups.
 """
 
 import click
@@ -35,6 +35,13 @@ except ImportError:
 
 console = Console()
 
+# CANONICAL BENCHMARK SETTINGS
+# These settings ensure consistent, reproducible evaluation across all models
+CANONICAL_TEMPERATURE = 0.3    # Balanced decision-making (not too rigid, not too random)
+CANONICAL_TOP_P = 0.9          # Standard nucleus sampling (industry default)
+CANONICAL_TOP_K = 40           # Reasonable exploration window
+CANONICAL_REPEAT_PENALTY = 1.1 # Slight anti-repetition bias
+
 
 @click.group()
 def main():
@@ -61,7 +68,7 @@ def main():
 def run(model: str, scenario: str, rounds: int, verbose: bool, classic_mode: bool, 
         neutral_prompts: bool, memory: str, visibility: str, plot: bool, save_analysis: str,
         save_database: bool, db_path: str):
-    """Run a single Beer Game with specified conditions"""
+    """Run a single Beer Game with specified conditions using canonical LLM settings"""
     
     # Check Ollama connection
     if not test_ollama_connection():
@@ -70,18 +77,23 @@ def run(model: str, scenario: str, rounds: int, verbose: bool, classic_mode: boo
         return
     
     console.print(f"[green]✅ Connected to Ollama server[/green]")
+    console.print(f"[blue]🎯 Using canonical settings: temp={CANONICAL_TEMPERATURE}, top_p={CANONICAL_TOP_P}[/blue]")
     
     # Convert parameters
     memory_windows = {'none': 0, 'short': 5, 'medium': 10, 'full': None}
     memory_window = memory_windows[memory]
     visibility_level = VisibilityLevel(visibility)
     
-    # Create agents with specified settings
+    # Create agents with canonical settings
     try:
         agents = create_ollama_agents(
             model, 
             neutral_prompt=neutral_prompts,
-            memory_window=memory_window
+            memory_window=memory_window,
+            temperature=CANONICAL_TEMPERATURE,
+            top_p=CANONICAL_TOP_P,
+            top_k=CANONICAL_TOP_K,
+            repeat_penalty=CANONICAL_REPEAT_PENALTY
         )
         
         prompt_type = "Neutral" if neutral_prompts else "Position-specific"
@@ -175,11 +187,14 @@ def run(model: str, scenario: str, rounds: int, verbose: bool, classic_mode: boo
 def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple, 
                scenarios: tuple, game_modes: tuple, runs: int, rounds: int, save_results: str,
                save_database: bool, db_path: str):
-    """Run fully crossed experimental design across all conditions"""
+    """Run fully crossed experimental design with canonical LLM settings"""
     
     if not test_ollama_connection():
         console.print("[red]❌ Cannot connect to Ollama server[/red]")
         return
+    
+    console.print(f"[blue]🎯 Using SCM-Arena canonical settings for all experiments:[/blue]")
+    console.print(f"[blue]   Temperature: {CANONICAL_TEMPERATURE} | Top_P: {CANONICAL_TOP_P} | Top_K: {CANONICAL_TOP_K}[/blue]")
     
     # Initialize data capture if requested
     tracker = None
@@ -201,7 +216,7 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
     total_experiments = len(conditions) * runs
     
     console.print(Panel(
-        f"""[bold blue]🧪 Fully Crossed Experimental Design[/bold blue]
+        f"""[bold blue]🧪 SCM-Arena Canonical Benchmark Study[/bold blue]
         
 📊 Experimental Factors:
 • Models: {len(models)} ({', '.join(models)})
@@ -214,11 +229,17 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
 🎯 Total Conditions: {len(conditions)}
 🔄 Runs per Condition: {runs}
 📈 Total Experiments: {total_experiments}
-⏱️  Estimated Time: {total_experiments * 2:.0f}-{total_experiments * 5:.0f} minutes""",
-        title="Experimental Design"
+⏱️  Estimated Time: {total_experiments * 2:.0f}-{total_experiments * 5:.0f} minutes
+
+🎛️ Canonical LLM Settings:
+• Temperature: {CANONICAL_TEMPERATURE}
+• Top_P: {CANONICAL_TOP_P}
+• Top_K: {CANONICAL_TOP_K}
+• Repeat Penalty: {CANONICAL_REPEAT_PENALTY}""",
+        title="Benchmark Configuration"
     ))
     
-    if not click.confirm("Proceed with experimental run?"):
+    if not click.confirm("Proceed with canonical benchmark run?"):
         return
     
     results = []
@@ -228,7 +249,7 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
         TextColumn("[progress.description]{task.description}"),
         console=console
     ) as progress:
-        task = progress.add_task("Running experiments...", total=total_experiments)
+        task = progress.add_task("Running benchmark experiments...", total=total_experiments)
         
         for condition in conditions:
             model, mem, prompt_type, vis, scenario, game_mode = condition
@@ -252,14 +273,23 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
                             scenario=scenario,
                             game_mode=game_mode,
                             rounds=rounds,
-                            run_number=run + 1
+                            run_number=run + 1,
+                            # Add canonical settings to metadata
+                            temperature=CANONICAL_TEMPERATURE,
+                            top_p=CANONICAL_TOP_P,
+                            top_k=CANONICAL_TOP_K,
+                            repeat_penalty=CANONICAL_REPEAT_PENALTY
                         )
                     
-                    # Create agents
+                    # Create agents with canonical settings
                     agents = create_ollama_agents(
                         model, 
                         neutral_prompt=neutral_prompt,
-                        memory_window=memory_window
+                        memory_window=memory_window,
+                        temperature=CANONICAL_TEMPERATURE,
+                        top_p=CANONICAL_TOP_P,
+                        top_k=CANONICAL_TOP_K,
+                        repeat_penalty=CANONICAL_REPEAT_PENALTY
                     )
                     
                     # Create game
@@ -348,6 +378,10 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
                         'game_mode': game_mode,
                         'run': run + 1,
                         'rounds': rounds,
+                        'temperature': CANONICAL_TEMPERATURE,
+                        'top_p': CANONICAL_TOP_P,
+                        'top_k': CANONICAL_TOP_K,
+                        'repeat_penalty': CANONICAL_REPEAT_PENALTY,
                         **summary
                     }
                     
@@ -379,11 +413,13 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
 @click.option('--rounds', '-r', default=20, help='Number of rounds')
 @click.option('--runs', default=3, help='Number of runs per condition')
 def visibility_study(model: str, scenario: str, rounds: int, runs: int):
-    """Compare all visibility levels systematically"""
+    """Compare all visibility levels systematically using canonical settings"""
     
     if not test_ollama_connection():
         console.print("[red]❌ Cannot connect to Ollama server[/red]")
         return
+    
+    console.print(f"[blue]🎯 Using canonical settings: temp={CANONICAL_TEMPERATURE}, top_p={CANONICAL_TOP_P}[/blue]")
     
     visibility_levels = ['local', 'adjacent', 'full']
     demand_pattern = DEMAND_PATTERNS.get(scenario, DEMAND_PATTERNS['classic'])[:rounds]
@@ -405,8 +441,14 @@ def visibility_study(model: str, scenario: str, rounds: int, runs: int):
             
             for run in range(runs):
                 try:
-                    # Create agents
-                    agents = create_ollama_agents(model_name=model)
+                    # Create agents with canonical settings
+                    agents = create_ollama_agents(
+                        model_name=model,
+                        temperature=CANONICAL_TEMPERATURE,
+                        top_p=CANONICAL_TOP_P,
+                        top_k=CANONICAL_TOP_K,
+                        repeat_penalty=CANONICAL_REPEAT_PENALTY
+                    )
                     
                     # Create game with visibility level
                     game = BeerGame(
@@ -478,7 +520,7 @@ def display_results(results, history=None):
 def display_experimental_results(results):
     """Display experimental results summary"""
     
-    console.print("\n[bold blue]🧪 Experimental Results Summary[/bold blue]")
+    console.print("\n[bold blue]🧪 Canonical Benchmark Results Summary[/bold blue]")
     
     if not results:
         console.print("[red]No results to display[/red]")
@@ -499,6 +541,7 @@ def display_experimental_results(results):
         unique_visibility = len(set(r['visibility'] for r in results))
         
         console.print(f"🎯 Tested: {unique_models} models, {unique_memory} memory strategies, {unique_visibility} visibility levels")
+        console.print(f"🎛️ All experiments used canonical settings: temp={CANONICAL_TEMPERATURE}, top_p={CANONICAL_TOP_P}")
 
 
 def display_visibility_comparison(results):
@@ -601,17 +644,25 @@ def save_experimental_results(results, filename):
 @main.command()
 @click.option('--model', '-m', default='llama3.2', help='Ollama model name')
 def test_model(model: str):
-    """Test a model with a simple scenario"""
+    """Test a model with canonical settings"""
     
     if not test_ollama_connection():
         console.print("[red]❌ Cannot connect to Ollama server[/red]")
         return
     
-    console.print(f"[blue]🧪 Testing model: {model}[/blue]")
+    console.print(f"[blue]🧪 Testing model: {model} with canonical settings[/blue]")
+    console.print(f"[blue]🎯 Settings: temp={CANONICAL_TEMPERATURE}, top_p={CANONICAL_TOP_P}[/blue]")
     
     try:
-        # Create single agent for testing
-        agent = OllamaAgent(Position.RETAILER, model)
+        # Create single agent for testing with canonical settings
+        agent = OllamaAgent(
+            Position.RETAILER, 
+            model,
+            temperature=CANONICAL_TEMPERATURE,
+            top_p=CANONICAL_TOP_P,
+            top_k=CANONICAL_TOP_K,
+            repeat_penalty=CANONICAL_REPEAT_PENALTY
+        )
         
         # Test with sample game state
         test_state = {

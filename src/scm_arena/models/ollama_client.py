@@ -1,8 +1,8 @@
 """
-Ollama client integration for Beer Game agents with cost-focused prompts.
+Ollama client integration for Beer Game agents with canonical benchmark settings.
 
-This module provides an agent that uses Ollama-hosted LLMs to make
-supply chain decisions with realistic cost constraints and no game references.
+MAJOR UPDATE: Implements canonical LLM settings (temperature=0.3, top_p=0.9) 
+for consistent, reproducible evaluation across all models and research groups.
 """
 
 import json
@@ -11,13 +11,22 @@ import time
 from typing import Dict, Any, Optional, List, Tuple
 from ..beer_game.agents import Agent, Position
 
+# CANONICAL BENCHMARK SETTINGS
+# These settings ensure consistent, reproducible evaluation across all models
+CANONICAL_TEMPERATURE = 0.3    # Balanced decision-making (not too rigid, not too random)
+CANONICAL_TOP_P = 0.9          # Standard nucleus sampling (industry default)
+CANONICAL_TOP_K = 40           # Reasonable exploration window
+CANONICAL_REPEAT_PENALTY = 1.1 # Slight anti-repetition bias
+
 
 class OllamaAgent(Agent):
     """
-    LLM agent using Ollama API for supply chain decisions.
+    LLM agent using Ollama API for supply chain decisions with canonical settings.
     
     Uses cost-focused prompts that avoid game references and emphasize
     the fundamental trade-off between inventory and stockout costs.
+    
+    Implements SCM-Arena canonical settings for benchmark consistency.
     """
     
     def __init__(
@@ -25,7 +34,10 @@ class OllamaAgent(Agent):
         position: Position,
         model_name: str = "llama3.2",
         base_url: str = "http://localhost:11434",
-        temperature: float = 0.1,
+        temperature: float = CANONICAL_TEMPERATURE,
+        top_p: float = CANONICAL_TOP_P,
+        top_k: int = CANONICAL_TOP_K,
+        repeat_penalty: float = CANONICAL_REPEAT_PENALTY,
         max_retries: int = 3,
         timeout: float = 30.0,
         neutral_prompt: bool = False,
@@ -33,13 +45,16 @@ class OllamaAgent(Agent):
         name: Optional[str] = None
     ):
         """
-        Initialize Ollama agent.
+        Initialize Ollama agent with canonical benchmark settings.
         
         Args:
             position: Supply chain position
             model_name: Name of Ollama model to use
             base_url: Ollama server URL
-            temperature: LLM temperature (0.0 = deterministic, 1.0 = creative)
+            temperature: LLM temperature (canonical: 0.3)
+            top_p: Nucleus sampling parameter (canonical: 0.9)
+            top_k: Top-k sampling parameter (canonical: 40)
+            repeat_penalty: Repetition penalty (canonical: 1.1)
             max_retries: Maximum API retry attempts
             timeout: Request timeout in seconds
             neutral_prompt: Use neutral prompts instead of position-specific ones
@@ -50,6 +65,9 @@ class OllamaAgent(Agent):
         self.model_name = model_name
         self.base_url = base_url.rstrip('/')
         self.temperature = temperature
+        self.top_p = top_p
+        self.top_k = top_k
+        self.repeat_penalty = repeat_penalty
         self.max_retries = max_retries
         self.timeout = timeout
         self.neutral_prompt = neutral_prompt
@@ -69,6 +87,13 @@ class OllamaAgent(Agent):
         
         # Initialize interaction tracking
         self._last_interaction = {}
+        
+        # Log canonical settings usage
+        if (temperature == CANONICAL_TEMPERATURE and top_p == CANONICAL_TOP_P and 
+            top_k == CANONICAL_TOP_K and repeat_penalty == CANONICAL_REPEAT_PENALTY):
+            self._using_canonical = True
+        else:
+            self._using_canonical = False
         
     def _create_cost_focused_system_prompt(self) -> str:
         """Create position-specific system prompt focused on cost minimization"""
@@ -214,7 +239,7 @@ The order must be a non-negative integer. Provide no other text outside the JSON
 
     def make_decision(self, game_state: Dict[str, Any]) -> int:
         """
-        Make ordering decision using Ollama LLM.
+        Make ordering decision using Ollama LLM with canonical settings.
         
         Args:
             game_state: Current observable game state
@@ -247,7 +272,12 @@ The order must be a non-negative integer. Provide no other text outside the JSON
             'response': '',
             'decision': 0,
             'response_time_ms': 0.0,
-            'success': False
+            'success': False,
+            'canonical_settings': self._using_canonical,
+            'temperature': self.temperature,
+            'top_p': self.top_p,
+            'top_k': self.top_k,
+            'repeat_penalty': self.repeat_penalty
         }
         
         # Get LLM response with retries
@@ -354,8 +384,8 @@ The order must be a non-negative integer. Provide no other text outside the JSON
         return "\n".join(prompt_parts)
     
     def _call_ollama(self, user_prompt: str) -> str:
-        """Make API call to Ollama"""
-        # Prepare request payload
+        """Make API call to Ollama with canonical settings"""
+        # Prepare request payload with canonical settings
         payload = {
             "model": self.model_name,
             "messages": [
@@ -365,7 +395,9 @@ The order must be a non-negative integer. Provide no other text outside the JSON
             "stream": False,
             "options": {
                 "temperature": self.temperature,
-                "top_p": 0.9,
+                "top_p": self.top_p,
+                "top_k": self.top_k,
+                "repeat_penalty": self.repeat_penalty,
                 "num_predict": 100,  # Limit response length
             }
         }
@@ -450,6 +482,16 @@ The order must be a non-negative integer. Provide no other text outside the JSON
             print(f"Failed to list models: {e}")
             return []
     
+    def get_canonical_settings(self) -> Dict[str, Any]:
+        """Get current LLM settings for verification"""
+        return {
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "top_k": self.top_k,
+            "repeat_penalty": self.repeat_penalty,
+            "using_canonical": self._using_canonical
+        }
+    
     def __del__(self):
         """Clean up session on deletion"""
         if hasattr(self, 'session'):
@@ -461,16 +503,24 @@ def create_ollama_agents(
     base_url: str = "http://localhost:11434",
     neutral_prompt: bool = False,
     memory_window: Optional[int] = 5,
+    temperature: float = CANONICAL_TEMPERATURE,
+    top_p: float = CANONICAL_TOP_P,
+    top_k: int = CANONICAL_TOP_K,
+    repeat_penalty: float = CANONICAL_REPEAT_PENALTY,
     **kwargs
 ) -> Dict[Position, OllamaAgent]:
     """
-    Create a full set of Ollama agents for all supply chain positions.
+    Create a full set of Ollama agents for all supply chain positions with canonical settings.
     
     Args:
         model_name: Ollama model to use
         base_url: Ollama server URL
         neutral_prompt: Use neutral prompts instead of position-specific ones
         memory_window: Number of past decisions to include (None = all, 0 = none, 5 = default)
+        temperature: LLM temperature (canonical: 0.3)
+        top_p: Nucleus sampling parameter (canonical: 0.9)
+        top_k: Top-k sampling parameter (canonical: 40)
+        repeat_penalty: Repetition penalty (canonical: 1.1)
         **kwargs: Additional arguments passed to OllamaAgent
         
     Returns:
@@ -483,6 +533,10 @@ def create_ollama_agents(
             base_url, 
             neutral_prompt=neutral_prompt,
             memory_window=memory_window,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            repeat_penalty=repeat_penalty,
             **kwargs
         )
         for position in Position
@@ -504,3 +558,19 @@ def test_ollama_connection(base_url: str = "http://localhost:11434") -> bool:
         return response.status_code == 200
     except Exception:
         return False
+
+
+def get_canonical_settings() -> Dict[str, Any]:
+    """
+    Get the canonical benchmark settings for reference.
+    
+    Returns:
+        Dictionary of canonical LLM settings
+    """
+    return {
+        "temperature": CANONICAL_TEMPERATURE,
+        "top_p": CANONICAL_TOP_P,
+        "top_k": CANONICAL_TOP_K,
+        "repeat_penalty": CANONICAL_REPEAT_PENALTY,
+        "description": "SCM-Arena canonical settings for reproducible benchmarking"
+    }
