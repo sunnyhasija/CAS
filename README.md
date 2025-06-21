@@ -11,8 +11,8 @@
 ### Run Your First Benchmark (2 minutes)
 ```bash
 # Install
-git clone https://github.com/your-org/scm-arena
-cd scm-arena
+git clone https://github.com/sunnyhasija/CAS
+cd CAS
 poetry install
 
 # Start Ollama & pull model
@@ -122,8 +122,8 @@ Prompt Types:
 ### **Quick Installation**
 ```bash
 # 1. Clone repository
-git clone https://github.com/your-org/scm-arena
-cd scm-arena
+git clone https://github.com/sunnyhasija/CAS
+cd CAS
 
 # 2. Install dependencies  
 poetry install
@@ -261,7 +261,7 @@ Key Insights:
 ### **Getting Started**
 ```bash
 # Fork the repository
-git fork https://github.com/your-org/scm-arena
+git fork https://github.com/sunnyhasija/CAS
 
 # Create feature branch
 git checkout -b feature/your-contribution
@@ -307,6 +307,7 @@ If you use SCM-Arena in your research, please cite:
 
 ## 🔗 Links
 
+- **Repository**: [https://github.com/sunnyhasija/CAS](https://github.com/sunnyhasija/CAS)
 - **Paper**: [Coming Soon]
 - **Dataset**: [Research Data Repository]
 - **Web Platform**: [SCM-Arena.com] (Coming Soon)
