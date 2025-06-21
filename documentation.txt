@@ -1,0 +1,220 @@
+# SCM-Arena Development Documentation
+
+## Project Overview
+SCM-Arena is a benchmark platform for evaluating Large Language Models on supply chain management coordination tasks, starting with the multi-agent Beer Game simulation.
+
+## Current Status: Planning Phase
+- **Phase**: Initial setup and planning
+- **Next Steps**: Repository setup, project structure, Beer Game engine development
+
+## Architecture
+
+### Project Structure
+```
+scm-arena/
+├── pyproject.toml              # Poetry dependencies
+├── src/
+│   ├── scm_arena/
+│   │   ├── __init__.py
+│   │   ├── beer_game/          # Core game engine
+│   │   │   ├── __init__.py
+│   │   │   ├── game.py         # Beer game logic
+│   │   │   ├── agents.py       # Agent interfaces
+│   │   │   └── metrics.py      # Evaluation metrics
+│   │   ├── models/             # LLM integrations
+│   │   │   ├── __init__.py
+│   │   │   ├── ollama_client.py
+│   │   │   └── base_model.py
+│   │   └── evaluation/         # Benchmark runner
+│   │       ├── __init__.py
+│   │       ├── runner.py
+│   │       └── scenarios.py
+├── tests/
+├── examples/
+└── README.md
+```
+
+## Development Phases
+
+### Phase 1: Core Beer Game Engine + Ollama Integration
+**Status**: Not Started
+**Goals**:
+- Implement Beer Game simulation logic
+- Create agent interface for LLMs
+- Basic Ollama client integration
+- CLI interface for running single games
+
+**Key Components**:
+- `BeerGame` class with 4-tier supply chain
+- `Agent` abstract base class
+- `OllamaAgent` implementation
+- Basic game runner
+
+### Phase 2: Evaluation Pipeline + Metrics
+**Status**: Not Started
+**Goals**:
+- Multiple scenario evaluation
+- Performance metrics calculation
+- Results storage and comparison
+- Statistical analysis
+
+**Key Metrics**:
+- Total Supply Chain Cost
+- Bullwhip Ratio (variance amplification)
+- Service Level (orders fulfilled %)
+- Inventory Efficiency
+- Convergence Time
+
+### Phase 3: Multiple Model Comparison
+**Status**: Not Started
+**Goals**:
+- Support multiple Ollama models
+- Batch evaluation across models
+- Comparative analysis
+- Results visualization
+
+### Phase 4: Web Interface (Optional)
+**Status**: Not Started
+**Goals**:
+- Simple leaderboard
+- Game visualization
+- Results dashboard
+
+## Technical Requirements
+
+### Dependencies (Planning)
+```toml
+[tool.poetry.dependencies]
+python = "^3.9"
+requests = "^2.31.0"          # For Ollama API calls
+pydantic = "^2.0.0"           # Data validation
+numpy = "^1.24.0"             # Numerical computations
+pandas = "^2.0.0"             # Data analysis
+matplotlib = "^3.7.0"         # Basic plotting
+plotly = "^5.15.0"            # Interactive plots (future web interface)
+fastapi = "^0.100.0"          # Future web API
+click = "^8.1.0"              # CLI interface
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-cov = "^4.1.0"
+black = "^23.7.0"
+isort = "^5.12.0"
+mypy = "^1.5.0"
+```
+
+### Local Environment Setup
+- Python 3.9+
+- Poetry for dependency management
+- Ollama installed and running
+- Git repository on GitHub
+
+## Beer Game Specification
+
+### Game Rules
+- **Players**: 4 agents (Retailer → Wholesaler → Distributor → Manufacturer)
+- **Objective**: Minimize total supply chain cost
+- **Information**: Each agent sees only local inventory and incoming orders
+- **Delays**: 2-week shipping delay, 2-week information delay
+- **Costs**: $1 per unit holding cost, $2 per unit backorder cost
+
+### Evaluation Scenarios
+1. **Classic Demand**: 4-4-4-4-8-8-8-8-4-4-4-4 pattern
+2. **Random Demand**: Normal distribution (μ=6, σ=2)
+3. **Shock Demand**: Stable with periodic spikes
+4. **Seasonal Demand**: Cyclical with trend
+
+### Performance Metrics
+- **Primary**: Total system cost
+- **Coordination**: Bullwhip ratio, convergence time
+- **Service**: Stockout frequency, fill rate
+- **Efficiency**: Inventory turns, cash-to-cash cycle
+
+## Implementation Notes
+
+### Beer Game Engine Design
+```python
+class BeerGame:
+    """Core beer game simulation engine"""
+    def __init__(self, agents: List[Agent], demand_pattern: List[int])
+    def step(self) -> GameState
+    def is_complete(self) -> bool
+    def get_results(self) -> GameResults
+
+class Agent:
+    """Abstract base class for supply chain agents"""
+    def make_decision(self, game_state: GameState) -> int
+    def get_position(self) -> Position  # RETAILER, WHOLESALER, etc.
+
+class OllamaAgent(Agent):
+    """LLM agent using Ollama API"""
+    def __init__(self, model_name: str, position: Position)
+    def make_decision(self, game_state: GameState) -> int
+```
+
+### Ollama Integration
+- Use requests library for HTTP API calls
+- Handle timeouts and retries
+- Parse JSON responses for order decisions
+- Log all API interactions for debugging
+
+## Getting Started Checklist
+
+### Repository Setup
+- [ ] Create GitHub repository
+- [ ] Clone locally
+- [ ] Initialize Poetry project
+- [ ] Set up basic project structure
+
+### Development Environment
+- [ ] Confirm Python 3.9+ installed
+- [ ] Verify Poetry working
+- [ ] Test Ollama installation
+- [ ] Identify target Llama models
+
+### Initial Implementation
+- [ ] Create pyproject.toml
+- [ ] Implement basic BeerGame class
+- [ ] Create Agent interfaces
+- [ ] Build OllamaAgent
+- [ ] Add CLI runner
+- [ ] Write basic tests
+
+## Future Enhancements
+
+### Short Term
+- Multiple demand patterns
+- Better prompt engineering for LLMs
+- Results export (CSV, JSON)
+- Performance profiling
+
+### Medium Term
+- Web interface with FastAPI
+- Database storage (SQLite → PostgreSQL)
+- Real-time game visualization
+- Multi-run statistical analysis
+
+### Long Term
+- Additional supply chain benchmarks
+- Human vs AI competitions
+- Integration with other LLM providers
+- Academic paper publication
+
+## Resources and References
+
+### Academic Papers
+- Sterman, J. (1989). "Modeling managerial behavior: Misperceptions of feedback in a dynamic decision making experiment"
+- Lee, H. et al. (1997). "The bullwhip effect in supply chains"
+
+### Technical References
+- [Ollama API Documentation](https://github.com/ollama/ollama/blob/main/docs/api.md)
+- [Beer Game Simulation Studies](https://en.wikipedia.org/wiki/Beer_distribution_game)
+
+## Contact and Collaboration
+- Repository: [To be created]
+- Issues: Use GitHub Issues for bug reports and feature requests
+- Discussions: GitHub Discussions for questions and ideas
+
+---
+**Last Updated**: Initial creation
+**Next Update**: After repository setup and initial code structure
