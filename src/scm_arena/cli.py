@@ -274,7 +274,6 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
                             game_mode=game_mode,
                             rounds=rounds,
                             run_number=run + 1,
-                            # Add canonical settings to metadata
                             temperature=CANONICAL_TEMPERATURE,
                             top_p=CANONICAL_TOP_P,
                             top_k=CANONICAL_TOP_K,
