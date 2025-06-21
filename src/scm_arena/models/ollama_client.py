@@ -1,9 +1,4 @@
-"""
-Ollama client integration for Beer Game agents with canonical benchmark settings.
 
-MAJOR UPDATE: Implements canonical LLM settings (temperature=0.3, top_p=0.9) 
-for consistent, reproducible evaluation across all models and research groups.
-"""
 
 import json
 import requests
@@ -27,6 +22,8 @@ class OllamaAgent(Agent):
     the fundamental trade-off between inventory and stockout costs.
     
     Implements SCM-Arena canonical settings for benchmark consistency.
+    
+    FIXED: Memory window now applied consistently to all decision history data.
     """
     
     def __init__(
@@ -321,7 +318,11 @@ The order must be a non-negative integer. Provide no other text outside the JSON
         return getattr(self, '_last_interaction', {})
     
     def _create_user_prompt(self, game_state: Dict[str, Any]) -> str:
-        """Create user prompt from game state with configurable memory"""
+        """
+        Create user prompt from game state with FIXED memory window consistency.
+        
+        FIXED: Memory window now applied consistently to all decision history data.
+        """
         prompt_parts = [
             f"PERIOD {game_state['round']}",
             f"Position: {game_state['position'].upper()}",
@@ -336,41 +337,47 @@ The order must be a non-negative integer. Provide no other text outside the JSON
         if self.position == Position.RETAILER and "customer_demand" in game_state:
             prompt_parts.append(f"Customer demand: {game_state['customer_demand']} units")
         
-        # Add decision history based on memory window setting
-        if game_state.get("decision_history") and self.memory_window != 0:
-            full_history = game_state["decision_history"]
+        # Add decision history - already properly filtered by memory window in game.py
+        if game_state.get("decision_history"):
+            history = game_state["decision_history"]
+            if self.memory_window == 0:
+                memory_desc = "No decision history available (reactive mode)"
+            elif self.memory_window is None:
+                memory_desc = f"Complete order history: {history}"
+            else:
+                memory_desc = f"Recent {len(history)} order(s): {history}"
             
-            if self.memory_window is None:
-                # Full memory - all decisions
-                history = full_history
-                memory_type = "complete order history"
-            elif self.memory_window > 0:
-                # Limited memory window
-                history = full_history[-self.memory_window:]
-                memory_type = f"recent {len(history)} order(s)"
-            
-            if history:
-                prompt_parts.append(f"Your {memory_type}: {history}")
+            prompt_parts.append(f"Your {memory_desc}")
+        elif self.memory_window == 0:
+            prompt_parts.append("Operating in reactive mode (no decision history)")
         
-        # Add memory context to decision prompt
-        if self.memory_window == 0:
-            prompt_parts.append("\nMake your order decision based on current period information only.")
-        elif self.memory_window is None:
-            prompt_parts.append("\nConsider your complete order history when making this decision.")
-        else:
-            prompt_parts.append(f"\nConsider your recent {self.memory_window} order(s) when making this decision.")
-        
-        # Add visibility information to prompt if available
+        # Add visibility information - FIXED: Now respects memory window consistently
         if "visible_supply_chain" in game_state:
             prompt_parts.append("\nSUPPLY CHAIN VISIBILITY:")
             for pos, info in game_state["visible_supply_chain"].items():
-                prompt_parts.append(f"{pos.title()}: Inventory={info['inventory']}, Backlog={info['backlog']}, Cost=${info['cost']:.2f}")
+                # Basic state information
+                prompt_parts.append(
+                    f"{pos.title()}: Inventory={info['inventory']}, "
+                    f"Backlog={info['backlog']}, Cost=${info['cost']:.2f}"
+                )
+                
+                # FIXED: Partner decision history now respects memory window
+                partner_history = info.get('decision_history', [])
+                if partner_history:
+                    prompt_parts.append(f"  {pos.title()} recent orders: {partner_history}")
+                elif self.memory_window == 0:
+                    prompt_parts.append(f"  {pos.title()} history not available (reactive mode)")
         
+        # FIXED: Visible history now respects memory window (applied in game.py)
         if "visible_history" in game_state:
             prompt_parts.append("\nPARTNER HISTORY:")
             for pos, history in game_state["visible_history"].items():
-                recent_history = history[-3:] if len(history) > 3 else history  # Show last 3 rounds
-                prompt_parts.append(f"{pos.title()} recent: {[f'R{h['round']}:Inv{h['inventory']},Order{h['outgoing_order']}' for h in recent_history]}")
+                if history:
+                    # History is already filtered by memory window in game.py
+                    recent_rounds = [f"R{h['round']}:Inv{h['inventory']},Order{h['outgoing_order']}" for h in history]
+                    prompt_parts.append(f"{pos.title()} history: {recent_rounds}")
+                elif self.memory_window == 0:
+                    prompt_parts.append(f"{pos.title()} history not available (reactive mode)")
         
         if "system_metrics" in game_state:
             metrics = game_state["system_metrics"]
@@ -378,6 +385,14 @@ The order must be a non-negative integer. Provide no other text outside the JSON
             prompt_parts.append(f"Total system cost: ${metrics['total_system_cost']:.2f}")
             prompt_parts.append(f"Total system inventory: {metrics['total_system_inventory']} units")
             prompt_parts.append(f"Total system backlog: {metrics['total_system_backlog']} units")
+        
+        # Add memory context to decision prompt
+        if self.memory_window == 0:
+            prompt_parts.append("\nMake your order decision based on current period information only.")
+        elif self.memory_window is None:
+            prompt_parts.append("\nConsider your complete order history when making this decision.")
+        else:
+            prompt_parts.append(f"\nConsider your recent information when making this decision.")
         
         prompt_parts.append("How many units should you order this period to minimize your total costs?")
         

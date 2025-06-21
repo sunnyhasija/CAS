@@ -1,9 +1,4 @@
-"""
-Beer Game simulation engine with FIXED modern mode logic.
 
-CRITICAL BUG FIX: Modern mode now properly propagates actual orders 
-instead of fulfilled amounts, ensuring fair comparison with classic mode.
-"""
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
@@ -65,9 +60,31 @@ class GameState:
     is_complete: bool = False
     
     def to_agent_view(self, position: Position, visibility: VisibilityLevel = VisibilityLevel.LOCAL, 
-                      state_history: List['GameState'] = None) -> Dict[str, Any]:
-        """Convert to agent-visible state based on visibility level and history"""
+                      state_history: List['GameState'] = None, memory_window: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Convert to agent-visible state based on visibility level and history.
+        
+        FIXED: Now consistently applies memory_window to both own and partner histories.
+        
+        Args:
+            position: Agent's position
+            visibility: Information visibility level
+            state_history: Historical game states for visibility
+            memory_window: Memory window for decision histories (None=all, 0=none, N=last N decisions)
+        """
         player = self.players[position]
+        
+        # Helper function to apply memory window consistently
+        def apply_memory_window(decision_history: List[int]) -> List[int]:
+            """Apply memory window to decision history consistently"""
+            if memory_window == 0:
+                return []  # No history
+            elif memory_window is None:
+                return decision_history.copy()  # Full history
+            elif memory_window > 0:
+                return decision_history[-memory_window:] if decision_history else []  # Limited history
+            else:
+                return []  # Invalid memory window
         
         # Base state (always visible)
         state = {
@@ -78,7 +95,7 @@ class GameState:
             "incoming_order": player.incoming_order,
             "last_outgoing_order": player.outgoing_order,
             "round_cost": player.period_cost,
-            "decision_history": player.decision_history.copy(),
+            "decision_history": apply_memory_window(player.decision_history),  # FIXED: Apply memory window
         }
         
         # Add customer demand for retailer
@@ -90,7 +107,7 @@ class GameState:
             visible_positions = self._get_visible_positions(position, visibility)
             
             if visible_positions:
-                # Current state visibility
+                # Current state visibility - FIXED: Apply memory window to partner histories
                 state["visible_supply_chain"] = {}
                 for vis_pos in visible_positions:
                     vis_player = self.players[vis_pos]
@@ -100,13 +117,13 @@ class GameState:
                         "incoming_order": vis_player.incoming_order,
                         "outgoing_order": vis_player.outgoing_order,
                         "cost": vis_player.period_cost,
-                        "decision_history": vis_player.decision_history.copy()
+                        "decision_history": apply_memory_window(vis_player.decision_history)  # FIXED: Consistent memory window
                     }
                 
-                # Historical visibility if state_history provided
+                # Historical visibility if state_history provided - FIXED: Apply memory window
                 if state_history:
                     state["visible_history"] = self._get_visible_history(
-                        position, visible_positions, state_history
+                        position, visible_positions, state_history, memory_window
                     )
         
         # Add system-wide metrics for full visibility
@@ -142,23 +159,45 @@ class GameState:
         return []
     
     def _get_visible_history(self, position: Position, visible_positions: List[Position], 
-                           state_history: List['GameState']) -> Dict[str, List[Dict]]:
-        """Get historical states for visible positions"""
+                           state_history: List['GameState'], memory_window: Optional[int] = None) -> Dict[str, List[Dict]]:
+        """
+        Get historical states for visible positions.
+        
+        FIXED: Now respects memory_window parameter for historical data.
+        FIXED: Added proper error handling instead of silent data loss.
+        
+        Args:
+            position: Agent's position
+            visible_positions: Positions visible to the agent
+            state_history: Historical game states
+            memory_window: Memory window for historical data (None=all, 0=none, N=last N rounds)
+        """
         history = {}
         
         for vis_pos in visible_positions:
             position_history = []
             for past_state in state_history:
-                if vis_pos in past_state.players:
-                    past_player = past_state.players[vis_pos]
-                    position_history.append({
-                        "round": past_state.round,
-                        "inventory": past_player.inventory,
-                        "backlog": past_player.backlog,
-                        "incoming_order": past_player.incoming_order,
-                        "outgoing_order": past_player.outgoing_order,
-                        "cost": past_player.period_cost
-                    })
+                # FIXED: Proper error handling instead of silent skip
+                if vis_pos not in past_state.players:
+                    raise ValueError(f"Position {vis_pos} missing from historical state round {past_state.round}")
+                
+                past_player = past_state.players[vis_pos]
+                position_history.append({
+                    "round": past_state.round,
+                    "inventory": past_player.inventory,
+                    "backlog": past_player.backlog,
+                    "incoming_order": past_player.incoming_order,
+                    "outgoing_order": past_player.outgoing_order,
+                    "cost": past_player.period_cost
+                })
+            
+            # FIXED: Apply memory window to historical data consistently
+            if memory_window == 0:
+                position_history = []  # No history
+            elif memory_window is not None and memory_window > 0:
+                position_history = position_history[-memory_window:]  # Limited history
+            # If memory_window is None, keep full history
+            
             history[vis_pos.value] = position_history
         
         return history
@@ -195,6 +234,7 @@ class BeerGame:
     Supports multiple information visibility levels for research.
     
     FIXED: Modern mode now properly propagates actual orders instead of fulfilled amounts.
+    FIXED: Memory window applied consistently across all visibility levels.
     """
     
     def __init__(
@@ -282,7 +322,7 @@ class BeerGame:
         # Phase 2: Fill orders and update backlogs
         self._fill_orders(customer_demand)
         
-        # Phase 3: Get agent decisions
+        # Phase 3: Get agent decisions - FIXED: Pass memory window consistently
         decisions = self._get_agent_decisions()
         
         # Phase 4: Update order pipeline
@@ -348,13 +388,17 @@ class BeerGame:
                 demand = player.incoming_order
     
     def _get_agent_decisions(self) -> Dict[Position, int]:
-        """Get ordering decisions from all agents"""
+        """Get ordering decisions from all agents - FIXED: Pass memory window consistently"""
         decisions = {}
         
         for position in Position:
             agent = self.agents[position]
+            
+            # FIXED: Get memory window from agent if available
+            memory_window = getattr(agent, 'memory_window', None)
+            
             agent_state = self.current_state.to_agent_view(
-                position, self.visibility_level, self.state_history
+                position, self.visibility_level, self.state_history, memory_window
             )
             
             try:
