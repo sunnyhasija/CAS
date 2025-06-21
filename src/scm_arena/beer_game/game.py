@@ -45,6 +45,10 @@ class PlayerState:
     # Decision history
     decision_history: List[int] = None
     
+    # FIXED: Service level tracking
+    period_demand: int = 0       # Demand received this period
+    period_fulfilled: int = 0    # Demand fulfilled this period
+    
     def __post_init__(self):
         if self.decision_history is None:
             self.decision_history = []
@@ -231,10 +235,11 @@ class BeerGame:
     - Holding cost: $1 per unit per period
     - Backorder cost: $2 per unit per period
     
-    Supports multiple information visibility levels for research.
+    Classic mode implements MIT classroom version:
+    - 2-period information delay + 2-period shipping delay = 4-period total delay
     
-    FIXED: Modern mode now properly propagates actual orders instead of fulfilled amounts.
-    FIXED: Memory window applied consistently across all visibility levels.
+    FIXED: Service level calculation now tracks period-by-period fulfillment
+    FIXED: Bullwhip calculation uses Lee, Padmanabhan & Whang (1997) methodology
     """
     
     def __init__(
@@ -319,7 +324,7 @@ class BeerGame:
         # Phase 1: Receive shipments and update inventory
         self._process_shipments()
         
-        # Phase 2: Fill orders and update backlogs
+        # Phase 2: Fill orders and update backlogs - FIXED: Now tracks service level properly
         self._fill_orders(customer_demand)
         
         # Phase 3: Get agent decisions - FIXED: Pass memory window consistently
@@ -358,6 +363,8 @@ class BeerGame:
         
         CRITICAL BUG FIX: Modern mode now properly propagates actual orders
         instead of fulfilled amounts to ensure fair comparison with classic mode.
+        
+        FIXED: Now properly tracks service level metrics period-by-period.
         """
         # Start with customer demand at retailer
         demand = customer_demand
@@ -368,6 +375,9 @@ class BeerGame:
             # Update incoming order (this round's demand)
             player.incoming_order = demand
             
+            # FIXED: Track period demand for service level calculation
+            player.period_demand = demand
+            
             # Total demand = incoming order + existing backlog
             total_demand = player.incoming_order + player.backlog
             
@@ -377,6 +387,9 @@ class BeerGame:
             
             # Update backlog
             player.backlog = total_demand - fulfilled
+            
+            # FIXED: Track period fulfillment for service level calculation
+            player.period_fulfilled = min(player.incoming_order, fulfilled)
             
             # FIXED: Demand propagation logic
             if self.classic_mode and position != Position.RETAILER:
@@ -481,19 +494,10 @@ class BeerGame:
             individual_costs[position] = cost
             total_cost += cost
         
-        # Calculate service level (orders fulfilled / total orders)
-        total_orders = 0
-        total_fulfilled = 0
+        # FIXED: Calculate service level properly using period-by-period fulfillment
+        service_level = self._calculate_service_level()
         
-        for state in self.state_history:
-            for position in Position:
-                player = state.players[position]
-                total_orders += player.incoming_order
-                total_fulfilled += max(0, player.incoming_order - player.backlog)
-        
-        service_level = total_fulfilled / max(1, total_orders)
-        
-        # Calculate bullwhip ratio (variance amplification)
+        # FIXED: Calculate bullwhip ratio using Lee, Padmanabhan & Whang (1997) methodology
         bullwhip_ratio = self._calculate_bullwhip_ratio()
         
         return GameResults(
@@ -504,35 +508,88 @@ class BeerGame:
             total_rounds=len(self.state_history)
         )
     
-    def _calculate_bullwhip_ratio(self) -> float:
-        """Calculate bullwhip effect (order variance amplification)"""
-        if len(self.state_history) < 3:
-            return 1.0
+    def _calculate_service_level(self) -> float:
+        """
+        FIXED: Calculate service level as period-by-period fulfillment rate.
         
-        # Get order sequences for each position
-        orders_by_position = {pos: [] for pos in Position}
+        Service level = Total demand fulfilled / Total demand received
+        Calculated properly without double-counting cumulative backlog.
+        """
+        total_demand = 0
+        total_fulfilled = 0
         
         for state in self.state_history:
             for position in Position:
-                orders_by_position[position].append(
-                    state.players[position].incoming_order
-                )
+                player = state.players[position]
+                # Use period-specific demand and fulfillment tracking
+                if hasattr(player, 'period_demand') and hasattr(player, 'period_fulfilled'):
+                    total_demand += player.period_demand
+                    total_fulfilled += player.period_fulfilled
+                else:
+                    # Fallback for states without period tracking (shouldn't happen with fixed code)
+                    total_demand += player.incoming_order
+                    # Estimate fulfillment as incoming order minus increase in backlog
+                    if len(self.state_history) > 1:
+                        prev_idx = self.state_history.index(state) - 1
+                        if prev_idx >= 0:
+                            prev_player = self.state_history[prev_idx].players[position]
+                            backlog_increase = player.backlog - prev_player.backlog
+                            estimated_fulfilled = max(0, player.incoming_order - backlog_increase)
+                            total_fulfilled += estimated_fulfilled
+                        else:
+                            total_fulfilled += max(0, player.incoming_order - player.backlog)
+                    else:
+                        total_fulfilled += max(0, player.incoming_order - player.backlog)
         
-        # Calculate variance for each position
-        variances = {}
-        for position, orders in orders_by_position.items():
-            if len(orders) > 1:
-                mean = sum(orders) / len(orders)
-                variance = sum((x - mean) ** 2 for x in orders) / len(orders)
-                variances[position] = max(variance, 0.001)  # Avoid division by zero
-            else:
-                variances[position] = 0.001
+        return total_fulfilled / max(1, total_demand)
+    
+    def _calculate_bullwhip_ratio(self) -> float:
+        """
+        FIXED: Calculate bullwhip effect using Lee, Padmanabhan & Whang (1997) methodology.
         
-        # Bullwhip ratio = upstream variance / downstream variance
-        retailer_var = variances[Position.RETAILER]
-        manufacturer_var = variances[Position.MANUFACTURER]
+        Bullwhip_i = Var(O^out_i) / Var(O^in_i)
         
-        return manufacturer_var / retailer_var
+        Where:
+        - O^in_i = orders received by stage i (its effective demand) 
+        - O^out_i = orders sent upstream by stage i
+        
+        Returns the ratio of manufacturer outgoing order variance to retailer incoming order variance
+        (variance amplification from downstream to upstream).
+        """
+        if len(self.state_history) < 3:
+            return 1.0
+        
+        # Collect order sequences: incoming orders (demand) and outgoing orders (response)
+        incoming_orders_by_position = {pos: [] for pos in Position}
+        outgoing_orders_by_position = {pos: [] for pos in Position}
+        
+        for state in self.state_history:
+            for position in Position:
+                player = state.players[position]
+                incoming_orders_by_position[position].append(player.incoming_order)
+                outgoing_orders_by_position[position].append(player.outgoing_order)
+        
+        # Calculate variances for incoming and outgoing orders
+        def calculate_variance(orders: List[int]) -> float:
+            if len(orders) <= 1:
+                return 0.001  # Avoid division by zero
+            mean = sum(orders) / len(orders)
+            variance = sum((x - mean) ** 2 for x in orders) / len(orders)
+            return max(variance, 0.001)  # Avoid division by zero
+        
+        # Calculate bullwhip ratio using Lee, Padmanabhan & Whang methodology:
+        # Ratio of upstream outgoing variance to downstream incoming variance
+        
+        # Retailer incoming orders = customer demand variance (baseline)
+        retailer_incoming_var = calculate_variance(incoming_orders_by_position[Position.RETAILER])
+        
+        # Manufacturer outgoing orders = most upstream variance amplification
+        manufacturer_outgoing_var = calculate_variance(outgoing_orders_by_position[Position.MANUFACTURER])
+        
+        # Bullwhip ratio = variance amplification from customer demand to manufacturer response
+        bullwhip_ratio = manufacturer_outgoing_var / retailer_incoming_var
+        
+        return bullwhip_ratio
     
     def get_state_history(self) -> List[GameState]:
         """Get complete game state history"""
@@ -544,10 +601,11 @@ def create_classic_beer_game(
     demand_pattern: List[int]
 ) -> BeerGame:
     """
-    Create Beer Game with classic 1960s settings.
+    Create Beer Game with classic 1960s settings (MIT classroom version).
     
     - 2-period information delays
     - 2-period shipping delays  
+    - Total: 4-period delay (2 info + 2 transportation)
     - $1 holding : $2 backorder costs
     """
     return BeerGame(

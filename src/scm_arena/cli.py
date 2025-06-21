@@ -1,8 +1,10 @@
 """
-Enhanced command-line interface for SCM-Arena with canonical LLM settings.
+Enhanced command-line interface for SCM-Arena with FIXED experimental defaults.
 
-MAJOR UPDATE: Implements canonical benchmark settings (temperature=0.3, top_p=0.9)
-for consistent, reproducible evaluation across all models and research groups.
+CRITICAL BUG FIX: Now includes all experimental factors in default settings
+- Adjacent visibility included in default visibility levels
+- Classic game mode included in default game modes
+- Ensures complete experimental coverage in default runs
 """
 
 import click
@@ -173,11 +175,11 @@ def run(model: str, scenario: str, rounds: int, verbose: bool, classic_mode: boo
               type=click.Choice(['none', 'short', 'medium', 'full']), help='Memory strategies')
 @click.option('--prompts', multiple=True, default=['specific', 'neutral'], 
               type=click.Choice(['specific', 'neutral']), help='Prompt types')
-@click.option('--visibility', multiple=True, default=['local', 'full'], 
+@click.option('--visibility', multiple=True, default=['local', 'adjacent', 'full'], 
               type=click.Choice(['local', 'adjacent', 'full']), help='Visibility levels')
 @click.option('--scenarios', multiple=True, default=['classic'], 
               type=click.Choice(['classic', 'random', 'shock', 'seasonal']), help='Scenarios to test')
-@click.option('--game-modes', multiple=True, default=['modern'], 
+@click.option('--game-modes', multiple=True, default=['modern', 'classic'], 
               type=click.Choice(['modern', 'classic']), help='Game mode settings')
 @click.option('--runs', default=3, help='Number of runs per condition')
 @click.option('--rounds', default=20, help='Rounds per game')
@@ -187,7 +189,13 @@ def run(model: str, scenario: str, rounds: int, verbose: bool, classic_mode: boo
 def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple, 
                scenarios: tuple, game_modes: tuple, runs: int, rounds: int, save_results: str,
                save_database: bool, db_path: str):
-    """Run fully crossed experimental design with canonical LLM settings"""
+    """
+    Run fully crossed experimental design with canonical LLM settings.
+    
+    FIXED: Now includes complete experimental factors in defaults:
+    - All visibility levels: local, adjacent, full
+    - All game modes: modern, classic
+    """
     
     if not test_ollama_connection():
         console.print("[red]❌ Cannot connect to Ollama server[/red]")
@@ -222,9 +230,9 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
 • Models: {len(models)} ({', '.join(models)})
 • Memory: {len(memory)} ({', '.join(memory)})  
 • Prompts: {len(prompts)} ({', '.join(prompts)})
-• Visibility: {len(visibility)} ({', '.join(visibility)})
+• Visibility: {len(visibility)} ({', '.join(visibility)}) [FIXED: Complete coverage]
 • Scenarios: {len(scenarios)} ({', '.join(scenarios)})
-• Game Modes: {len(game_modes)} ({', '.join(game_modes)})
+• Game Modes: {len(game_modes)} ({', '.join(game_modes)}) [FIXED: Complete coverage]
 
 🎯 Total Conditions: {len(conditions)}
 🔄 Runs per Condition: {runs}
@@ -235,7 +243,9 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
 • Temperature: {CANONICAL_TEMPERATURE}
 • Top_P: {CANONICAL_TOP_P}
 • Top_K: {CANONICAL_TOP_K}
-• Repeat Penalty: {CANONICAL_REPEAT_PENALTY}""",
+• Repeat Penalty: {CANONICAL_REPEAT_PENALTY}
+
+✅ FIXED: Complete experimental coverage with all visibility levels and game modes""",
         title="Benchmark Configuration"
     ))
     
@@ -538,8 +548,9 @@ def display_experimental_results(results):
         unique_models = len(set(r['model'] for r in results))
         unique_memory = len(set(r['memory'] for r in results))  
         unique_visibility = len(set(r['visibility'] for r in results))
+        unique_game_modes = len(set(r['game_mode'] for r in results))
         
-        console.print(f"🎯 Tested: {unique_models} models, {unique_memory} memory strategies, {unique_visibility} visibility levels")
+        console.print(f"🎯 Tested: {unique_models} models, {unique_memory} memory strategies, {unique_visibility} visibility levels, {unique_game_modes} game modes")
         console.print(f"🎛️ All experiments used canonical settings: temp={CANONICAL_TEMPERATURE}, top_p={CANONICAL_TOP_P}")
 
 
