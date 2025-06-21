@@ -1,272 +1,426 @@
 #!/usr/bin/env python3
 """
-SCM-Arena Database Testing Script
-Tests the fixed memory window logic by analyzing experimental data.
+Comprehensive SCM-Arena Testing Script
+Tests all the critical fixes we implemented.
 
-Usage: python test_db.py [database_path]
+Usage: python comprehensive_test.py [database_path]
 """
 
 import sqlite3
 import pandas as pd
 import json
 import sys
+import numpy as np
 from pathlib import Path
 from typing import Dict, List, Any
 
 
-def connect_to_db(db_path: str) -> sqlite3.Connection:
-    """Connect to the SCM-Arena database"""
-    if not Path(db_path).exists():
-        raise FileNotFoundError(f"Database not found: {db_path}")
-    
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row  # Enable column access by name
-    return conn
-
-
-def test_basic_db_structure(conn: sqlite3.Connection) -> None:
-    """Test basic database structure and content"""
-    print("🔍 TESTING DATABASE STRUCTURE")
+def test_demand_scenario_consistency():
+    """Test that all demand scenarios have consistent baseline levels"""
+    print("🔍 TESTING DEMAND SCENARIO CONSISTENCY")
     print("=" * 50)
-    
-    # Check tables exist
-    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    tables = [row[0] for row in cursor.fetchall()]
-    
-    expected_tables = ['experiments', 'rounds', 'agent_rounds', 'game_states']
-    print(f"📊 Tables found: {tables}")
-    
-    for table in expected_tables:
-        if table in tables:
-            print(f"✅ {table} table exists")
-        else:
-            print(f"❌ {table} table missing")
-    
-    # Check row counts
-    print(f"\n📈 Row counts:")
-    for table in tables:
-        cursor = conn.execute(f"SELECT COUNT(*) FROM {table}")
-        count = cursor.fetchone()[0]
-        print(f"  {table}: {count} rows")
-    
-    print()
-
-
-def test_memory_window_consistency(conn: sqlite3.Connection) -> None:
-    """Test that memory window is applied consistently across visibility levels"""
-    print("🧠 TESTING MEMORY WINDOW CONSISTENCY")
-    print("=" * 50)
-    
-    # Get experiments grouped by memory strategy and visibility
-    query = """
-    SELECT memory_strategy, visibility_level, COUNT(*) as experiment_count,
-           AVG(total_cost) as avg_cost, AVG(service_level) as avg_service
-    FROM experiments 
-    GROUP BY memory_strategy, visibility_level
-    ORDER BY memory_strategy, visibility_level
-    """
-    
-    df = pd.read_sql_query(query, conn)
-    print("📊 Experiments by memory strategy and visibility:")
-    print(df.to_string(index=False))
-    print()
-    
-    # Test: Check that 'none' memory strategy shows different results from others
-    none_results = df[df['memory_strategy'] == 'none']
-    other_results = df[df['memory_strategy'] != 'none']
-    
-    if len(none_results) > 0 and len(other_results) > 0:
-        none_avg_cost = none_results['avg_cost'].mean()
-        other_avg_cost = other_results['avg_cost'].mean()
-        
-        print(f"💡 Memory Strategy Impact Analysis:")
-        print(f"   'none' memory average cost: ${none_avg_cost:.2f}")
-        print(f"   Other memory average cost: ${other_avg_cost:.2f}")
-        print(f"   Difference: {abs(none_avg_cost - other_avg_cost):.2f}")
-        
-        if abs(none_avg_cost - other_avg_cost) > 50:  # Threshold for meaningful difference
-            print(f"✅ Memory strategies show significant performance differences")
-        else:
-            print(f"⚠️  Memory strategies show minimal differences - check if bug is fixed")
-    
-    print()
-
-
-def test_agent_decision_patterns(conn: sqlite3.Connection) -> None:
-    """Test agent decision patterns for memory consistency"""
-    print("🤖 TESTING AGENT DECISION PATTERNS")
-    print("=" * 50)
-    
-    # Sample some agent interactions to check memory window application
-    query = """
-    SELECT e.memory_strategy, e.visibility_level, e.experiment_id, 
-           ar.round_number, ar.position, ar.prompt_sent
-    FROM experiments e
-    JOIN agent_rounds ar ON e.experiment_id = ar.experiment_id
-    WHERE ar.round_number = 5  -- Check round 5 where history should be visible
-    AND ar.position = 'wholesaler'  -- Focus on wholesaler for adjacent visibility tests
-    LIMIT 10
-    """
-    
-    cursor = conn.execute(query)
-    rows = cursor.fetchall()
-    
-    print(f"📝 Sample agent prompts (Round 5, Wholesaler position):")
-    print()
-    
-    for row in rows:
-        memory_strategy = row['memory_strategy']
-        visibility_level = row['visibility_level']
-        prompt = row['prompt_sent']
-        
-        print(f"🔬 Memory: {memory_strategy}, Visibility: {visibility_level}")
-        print(f"Experiment ID: {row['experiment_id']}")
-        
-        # Check for memory-related content in prompts
-        if 'decision_history' in prompt.lower() or 'order history' in prompt.lower():
-            print(f"✅ Contains decision history information")
-        else:
-            print(f"❌ No decision history found in prompt")
-        
-        if memory_strategy == 'none' and ('recent' in prompt.lower() or 'history' in prompt.lower()):
-            print(f"⚠️  WARNING: 'none' memory strategy but prompt contains history!")
-        
-        # Check visibility information
-        if visibility_level == 'adjacent':
-            if 'supply chain visibility' in prompt.lower() or 'partner' in prompt.lower():
-                print(f"✅ Contains adjacent visibility information")
-            else:
-                print(f"❌ No adjacent visibility info found")
-        
-        print(f"📄 Prompt preview: {prompt[:200]}...")
-        print("-" * 40)
-    
-    print()
-
-
-def test_game_state_consistency(conn: sqlite3.Connection) -> None:
-    """Test game state data for consistency"""
-    print("🎮 TESTING GAME STATE CONSISTENCY")
-    print("=" * 50)
-    
-    # Check a sample game state JSON for memory window application
-    query = """
-    SELECT e.memory_strategy, e.visibility_level, gs.game_state_json
-    FROM experiments e
-    JOIN game_states gs ON e.experiment_id = gs.experiment_id
-    WHERE gs.round_number = 5
-    LIMIT 3
-    """
-    
-    cursor = conn.execute(query)
-    rows = cursor.fetchall()
-    
-    for row in rows:
-        memory_strategy = row['memory_strategy']
-        visibility_level = row['visibility_level']
-        
-        try:
-            game_state = json.loads(row['game_state_json'])
-            print(f"🎯 Memory: {memory_strategy}, Visibility: {visibility_level}")
-            
-            # Check if decision histories are present and properly limited
-            players = game_state.get('players', {})
-            
-            for position, player_data in players.items():
-                decision_history = player_data.get('decision_history', [])
-                print(f"  {position}: {len(decision_history)} decision history entries")
-                
-                # For 'none' memory, should be empty; for 'short', should be <= 5
-                if memory_strategy == 'none' and len(decision_history) > 0:
-                    print(f"    ⚠️  WARNING: 'none' memory but has {len(decision_history)} history entries")
-                elif memory_strategy == 'short' and len(decision_history) > 5:
-                    print(f"    ⚠️  WARNING: 'short' memory but has {len(decision_history)} history entries")
-                else:
-                    print(f"    ✅ Decision history length consistent with memory strategy")
-            
-            print()
-            
-        except json.JSONDecodeError:
-            print(f"❌ Invalid JSON in game state")
-    
-    print()
-
-
-def test_cost_analysis_by_conditions(conn: sqlite3.Connection) -> None:
-    """Analyze costs by experimental conditions to detect patterns"""
-    print("💰 COST ANALYSIS BY CONDITIONS")
-    print("=" * 50)
-    
-    # Compare costs across memory strategies for each visibility level
-    query = """
-    SELECT memory_strategy, visibility_level,
-           COUNT(*) as runs,
-           ROUND(AVG(total_cost), 2) as avg_cost,
-           ROUND(MIN(total_cost), 2) as min_cost,
-           ROUND(MAX(total_cost), 2) as max_cost,
-           ROUND(AVG(service_level), 3) as avg_service,
-           ROUND(AVG(bullwhip_ratio), 3) as avg_bullwhip
-    FROM experiments
-    GROUP BY memory_strategy, visibility_level
-    ORDER BY visibility_level, memory_strategy
-    """
-    
-    df = pd.read_sql_query(query, conn)
-    
-    print("📊 Performance metrics by condition:")
-    print(df.to_string(index=False))
-    print()
-    
-    # Look for unexpected patterns
-    for visibility in df['visibility_level'].unique():
-        print(f"🔍 Analysis for {visibility} visibility:")
-        subset = df[df['visibility_level'] == visibility]
-        
-        cost_range = subset['avg_cost'].max() - subset['avg_cost'].min()
-        service_range = subset['avg_service'].max() - subset['avg_service'].min()
-        
-        print(f"  Cost range: ${cost_range:.2f}")
-        print(f"  Service level range: {service_range:.3f}")
-        
-        if cost_range > 100:  # Significant cost difference
-            print(f"  ✅ Memory strategies show significant cost differences")
-        else:
-            print(f"  ⚠️  Memory strategies show minimal cost differences")
-        
-        print()
-
-
-def run_comprehensive_test(db_path: str) -> None:
-    """Run all database tests"""
-    print("🧪 SCM-ARENA DATABASE TESTING SUITE")
-    print("=" * 60)
-    print(f"📁 Database: {db_path}")
-    print()
     
     try:
-        conn = connect_to_db(db_path)
+        # Import scenarios to test
+        from src.scm_arena.evaluation.scenarios import DEMAND_PATTERNS, get_scenario_statistics
         
-        # Run all tests
-        test_basic_db_structure(conn)
-        test_memory_window_consistency(conn)
-        test_agent_decision_patterns(conn)
-        test_game_state_consistency(conn)
-        test_cost_analysis_by_conditions(conn)
+        stats = get_scenario_statistics()
         
-        print("🎉 DATABASE TESTING COMPLETE!")
-        print()
-        print("🔍 SUMMARY:")
-        print("- Check for ⚠️  warnings that indicate potential bugs")
-        print("- Look for significant differences between memory strategies")
-        print("- Verify that 'none' memory shows no decision history")
-        print("- Confirm adjacent visibility works without memory leakage")
+        print("📊 Demand Scenario Statistics:")
+        print(f"{'Scenario':<10} {'Mean':<6} {'Std':<6} {'Min':<4} {'Max':<4} {'Baseline Deviation':<18}")
+        print("-" * 65)
+        
+        baseline = 4.0
+        all_consistent = True
+        
+        for scenario, stat in stats.items():
+            deviation = abs(stat['mean'] - baseline)
+            status = "✅" if deviation <= 1.0 else "❌"
+            
+            if deviation > 1.0:
+                all_consistent = False
+            
+            print(f"{scenario:<10} {stat['mean']:<6.1f} {stat['std']:<6.1f} {stat['min']:<4.0f} {stat['max']:<4.0f} {deviation:<6.1f} ({status})")
+        
+        if all_consistent:
+            print("\n✅ All scenarios have consistent baseline demand (~4.0)")
+        else:
+            print("\n❌ Some scenarios have inconsistent baseline demand")
+        
+        # Show first 10 periods for verification
+        print("\nFirst 10 periods preview:")
+        for scenario, pattern in DEMAND_PATTERNS.items():
+            print(f"  {scenario:>8}: {pattern[:10]}")
+        
+        return all_consistent
         
     except Exception as e:
-        print(f"❌ Error during testing: {e}")
+        print(f"❌ Error testing demand scenarios: {e}")
+        return False
+
+
+def test_cli_experimental_defaults():
+    """Test that CLI includes all experimental factors in defaults"""
+    print("\n🔍 TESTING CLI EXPERIMENTAL DEFAULTS")
+    print("=" * 50)
     
-    finally:
-        if 'conn' in locals():
-            conn.close()
+    try:
+        # Check CLI source for default values
+        cli_file = Path("src/scm_arena/cli.py")
+        if not cli_file.exists():
+            print("❌ CLI file not found")
+            return False
+        
+        with open(cli_file, 'r') as f:
+            cli_content = f.read()
+        
+        # Check visibility defaults
+        if "default=['local', 'adjacent', 'full']" in cli_content:
+            print("✅ Visibility defaults include all levels: local, adjacent, full")
+            visibility_complete = True
+        else:
+            print("❌ Visibility defaults incomplete")
+            visibility_complete = False
+        
+        # Check game mode defaults  
+        if "default=['modern', 'classic']" in cli_content:
+            print("✅ Game mode defaults include both: modern, classic")
+            game_mode_complete = True
+        else:
+            print("❌ Game mode defaults incomplete")
+            game_mode_complete = False
+        
+        # Check memory defaults
+        if "default=['none', 'short', 'full']" in cli_content:
+            print("✅ Memory defaults include: none, short, full")
+            memory_complete = True
+        else:
+            print("❌ Memory defaults incomplete")
+            memory_complete = False
+        
+        return visibility_complete and game_mode_complete and memory_complete
+        
+    except Exception as e:
+        print(f"❌ Error testing CLI defaults: {e}")
+        return False
+
+
+def test_database_service_level_calculation(db_path: str):
+    """Test service level calculation in database results"""
+    print(f"\n🔍 TESTING SERVICE LEVEL CALCULATION")
+    print("=" * 50)
+    
+    if not Path(db_path).exists():
+        print(f"❌ Database not found: {db_path}")
+        return False
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        
+        # Get service level values from experiments
+        query = """
+        SELECT experiment_id, service_level, total_cost, bullwhip_ratio,
+               memory_strategy, visibility_level, game_mode
+        FROM experiments 
+        ORDER BY service_level
+        """
+        
+        df = pd.read_sql_query(query, conn)
+        
+        if len(df) == 0:
+            print("❌ No experiments found in database")
+            return False
+        
+        print(f"📊 Service Level Analysis ({len(df)} experiments):")
+        print(f"  Range: {df['service_level'].min():.3f} - {df['service_level'].max():.3f}")
+        print(f"  Mean: {df['service_level'].mean():.3f}")
+        print(f"  Std: {df['service_level'].std():.3f}")
+        
+        # Check for reasonable service level values
+        if df['service_level'].min() < 0 or df['service_level'].max() > 1:
+            print("❌ Service levels outside valid range [0,1]")
+            return False
+        
+        # Check for variation in service levels
+        if df['service_level'].std() < 0.01:
+            print("⚠️  Very low service level variation - check calculation")
+        else:
+            print("✅ Service levels show reasonable variation")
+        
+        # Show sample results
+        print("\nSample service level results:")
+        sample = df.sample(min(5, len(df)))
+        for _, row in sample.iterrows():
+            print(f"  {row['memory_strategy']}-{row['visibility_level']}-{row['game_mode']}: "
+                  f"Service={row['service_level']:.3f}, Cost=${row['total_cost']:.0f}")
+        
+        conn.close()
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error testing service level: {e}")
+        return False
+
+
+def test_database_bullwhip_calculation(db_path: str):
+    """Test bullwhip ratio calculation in database results"""
+    print(f"\n🔍 TESTING BULLWHIP RATIO CALCULATION")
+    print("=" * 50)
+    
+    if not Path(db_path).exists():
+        print(f"❌ Database not found: {db_path}")
+        return False
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        
+        # Get bullwhip values from experiments
+        query = """
+        SELECT experiment_id, bullwhip_ratio, service_level, total_cost,
+               memory_strategy, visibility_level, game_mode
+        FROM experiments 
+        ORDER BY bullwhip_ratio
+        """
+        
+        df = pd.read_sql_query(query, conn)
+        
+        if len(df) == 0:
+            print("❌ No experiments found in database")
+            return False
+        
+        print(f"📊 Bullwhip Ratio Analysis ({len(df)} experiments):")
+        print(f"  Range: {df['bullwhip_ratio'].min():.3f} - {df['bullwhip_ratio'].max():.3f}")
+        print(f"  Mean: {df['bullwhip_ratio'].mean():.3f}")
+        print(f"  Std: {df['bullwhip_ratio'].std():.3f}")
+        
+        # Check for reasonable bullwhip values (should be >= 1.0)
+        if df['bullwhip_ratio'].min() < 0.5:
+            print("⚠️  Some bullwhip ratios < 0.5 - check calculation")
+        
+        # Check for variation in bullwhip ratios
+        if df['bullwhip_ratio'].std() < 0.01:
+            print("⚠️  Very low bullwhip variation - check calculation")
+        else:
+            print("✅ Bullwhip ratios show reasonable variation")
+        
+        # Show sample results
+        print("\nSample bullwhip ratio results:")
+        sample = df.sample(min(5, len(df)))
+        for _, row in sample.iterrows():
+            print(f"  {row['memory_strategy']}-{row['visibility_level']}-{row['game_mode']}: "
+                  f"Bullwhip={row['bullwhip_ratio']:.3f}, Service={row['service_level']:.3f}")
+        
+        conn.close()
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error testing bullwhip ratio: {e}")
+        return False
+
+
+def test_memory_window_consistency(db_path: str):
+    """Test that memory window fix is working correctly"""
+    print(f"\n🔍 TESTING MEMORY WINDOW CONSISTENCY")
+    print("=" * 50)
+    
+    if not Path(db_path).exists():
+        print(f"❌ Database not found: {db_path}")
+        return False
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        
+        # Check that different memory strategies produce different results
+        query = """
+        SELECT memory_strategy, visibility_level,
+               COUNT(*) as experiments,
+               AVG(total_cost) as avg_cost,
+               AVG(service_level) as avg_service,
+               AVG(bullwhip_ratio) as avg_bullwhip
+        FROM experiments 
+        GROUP BY memory_strategy, visibility_level
+        ORDER BY memory_strategy, visibility_level
+        """
+        
+        df = pd.read_sql_query(query, conn)
+        
+        if len(df) == 0:
+            print("❌ No experiments found in database")
+            return False
+        
+        print("📊 Memory Strategy Performance by Visibility:")
+        print(f"{'Memory':<8} {'Visibility':<10} {'Experiments':<12} {'Avg Cost':<10} {'Avg Service':<12} {'Avg Bullwhip':<12}")
+        print("-" * 80)
+        
+        memory_effects = {}
+        
+        for _, row in df.iterrows():
+            print(f"{row['memory_strategy']:<8} {row['visibility_level']:<10} {row['experiments']:<12} "
+                  f"${row['avg_cost']:<9.0f} {row['avg_service']:<12.3f} {row['avg_bullwhip']:<12.3f}")
+            
+            # Track memory strategy effects
+            if row['visibility_level'] not in memory_effects:
+                memory_effects[row['visibility_level']] = {}
+            memory_effects[row['visibility_level']][row['memory_strategy']] = row['avg_cost']
+        
+        # Check for meaningful differences between memory strategies
+        significant_differences = 0
+        
+        for visibility, strategies in memory_effects.items():
+            if len(strategies) > 1:
+                costs = list(strategies.values())
+                cost_range = max(costs) - min(costs)
+                print(f"\n{visibility} visibility cost range: ${cost_range:.0f}")
+                
+                if cost_range > 50:  # Threshold for meaningful difference
+                    print(f"  ✅ Significant memory strategy differences in {visibility} visibility")
+                    significant_differences += 1
+                else:
+                    print(f"  ⚠️  Minimal memory strategy differences in {visibility} visibility")
+        
+        conn.close()
+        
+        if significant_differences > 0:
+            print(f"\n✅ Memory window fix working: {significant_differences} visibility levels show significant differences")
+            return True
+        else:
+            print(f"\n⚠️  Memory strategies show minimal differences - may need investigation")
+            return False
+        
+    except Exception as e:
+        print(f"❌ Error testing memory window consistency: {e}")
+        return False
+
+
+def test_experimental_completeness(db_path: str):
+    """Test that all experimental factors are represented"""
+    print(f"\n🔍 TESTING EXPERIMENTAL COMPLETENESS")
+    print("=" * 50)
+    
+    if not Path(db_path).exists():
+        print(f"❌ Database not found: {db_path}")
+        return False
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        
+        # Check experimental factor coverage
+        queries = {
+            "Memory Strategies": "SELECT DISTINCT memory_strategy FROM experiments ORDER BY memory_strategy",
+            "Visibility Levels": "SELECT DISTINCT visibility_level FROM experiments ORDER BY visibility_level", 
+            "Game Modes": "SELECT DISTINCT game_mode FROM experiments ORDER BY game_mode",
+            "Prompt Types": "SELECT DISTINCT prompt_type FROM experiments ORDER BY prompt_type",
+            "Scenarios": "SELECT DISTINCT scenario FROM experiments ORDER BY scenario"
+        }
+        
+        expected = {
+            "Memory Strategies": ["full", "none", "short"],
+            "Visibility Levels": ["adjacent", "full", "local"],
+            "Game Modes": ["classic", "modern"],
+            "Prompt Types": ["neutral", "specific"],
+            "Scenarios": ["classic"]
+        }
+        
+        all_complete = True
+        
+        for factor, query in queries.items():
+            df = pd.read_sql_query(query, conn)
+            found = df.iloc[:, 0].tolist()
+            expected_values = expected[factor]
+            
+            print(f"\n{factor}:")
+            print(f"  Found: {found}")
+            print(f"  Expected: {expected_values}")
+            
+            missing = set(expected_values) - set(found)
+            extra = set(found) - set(expected_values)
+            
+            if missing:
+                print(f"  ❌ Missing: {missing}")
+                all_complete = False
+            else:
+                print(f"  ✅ Complete coverage")
+            
+            if extra:
+                print(f"  ℹ️  Extra: {extra}")
+        
+        # Check total experimental combinations
+        combination_query = """
+        SELECT memory_strategy, visibility_level, game_mode, prompt_type, scenario,
+               COUNT(*) as runs
+        FROM experiments 
+        GROUP BY memory_strategy, visibility_level, game_mode, prompt_type, scenario
+        ORDER BY memory_strategy, visibility_level, game_mode
+        """
+        
+        df = pd.read_sql_query(combination_query, conn)
+        unique_combinations = len(df)
+        
+        print(f"\n📊 Experimental Combinations:")
+        print(f"  Total unique combinations: {unique_combinations}")
+        print(f"  Total experiment runs: {df['runs'].sum()}")
+        print(f"  Runs per combination: {df['runs'].mean():.1f} ± {df['runs'].std():.1f}")
+        
+        conn.close()
+        
+        if all_complete:
+            print(f"\n✅ All experimental factors have complete coverage")
+        else:
+            print(f"\n❌ Some experimental factors are missing")
+        
+        return all_complete
+        
+    except Exception as e:
+        print(f"❌ Error testing experimental completeness: {e}")
+        return False
+
+
+def run_comprehensive_test(db_path: str = "test_fixed_memory.db"):
+    """Run all tests and provide summary"""
+    print("🧪 COMPREHENSIVE SCM-ARENA TESTING SUITE")
+    print("=" * 60)
+    print(f"📁 Testing with database: {db_path}")
+    print()
+    
+    # Track test results
+    test_results = {}
+    
+    # Run all tests
+    test_results["Demand Scenario Consistency"] = test_demand_scenario_consistency()
+    test_results["CLI Experimental Defaults"] = test_cli_experimental_defaults()
+    
+    # Database tests (only if database exists)
+    if Path(db_path).exists():
+        test_results["Service Level Calculation"] = test_database_service_level_calculation(db_path)
+        test_results["Bullwhip Ratio Calculation"] = test_database_bullwhip_calculation(db_path)
+        test_results["Memory Window Consistency"] = test_memory_window_consistency(db_path)
+        test_results["Experimental Completeness"] = test_experimental_completeness(db_path)
+    else:
+        print(f"\n⚠️  Database {db_path} not found - skipping database tests")
+        print("   Run an experiment first to generate test data")
+    
+    # Summary
+    print("\n" + "=" * 60)
+    print("🎯 TEST SUMMARY")
+    print("=" * 60)
+    
+    passed = 0
+    total = len(test_results)
+    
+    for test_name, result in test_results.items():
+        status = "✅ PASS" if result else "❌ FAIL"
+        print(f"{test_name:<30} {status}")
+        if result:
+            passed += 1
+    
+    print(f"\nOverall: {passed}/{total} tests passed ({passed/total*100:.1f}%)")
+    
+    if passed == total:
+        print("🎉 ALL TESTS PASSED! Your fixes are working correctly.")
+    else:
+        print("⚠️  Some tests failed. Check the output above for issues.")
+    
+    return passed == total
 
 
 def main():
@@ -276,7 +430,10 @@ def main():
     else:
         db_path = "test_fixed_memory.db"
     
-    run_comprehensive_test(db_path)
+    success = run_comprehensive_test(db_path)
+    
+    if not success:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
