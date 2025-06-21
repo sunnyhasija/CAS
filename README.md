@@ -288,9 +288,9 @@ If you use SCM-Arena in your research, please cite:
 ```bibtex
 @software{scm_arena_2025,
   title = {SCM-Arena: A Benchmark Platform for Large Language Model Supply Chain Coordination},
-  author = {Your Name and Contributors},
+  author = {Abhinav "Sunny" Hasija and Vince Castillo},
   year = {2025},
-  url = {https://github.com/your-org/scm-arena},
+  url = {https://github.com/sunnyhasija/CAS},
   note = {Version 1.0}
 }
 ```
