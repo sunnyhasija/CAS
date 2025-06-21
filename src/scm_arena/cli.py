@@ -15,6 +15,7 @@ from .beer_game.game import BeerGame
 from .beer_game.agents import Position, SimpleAgent, RandomAgent, OptimalAgent
 from .models.ollama_client import OllamaAgent, test_ollama_connection, create_ollama_agents
 from .evaluation.scenarios import DEMAND_PATTERNS
+from .visualization.plots import plot_game_analysis, create_game_summary_report
 
 console = Console()
 
@@ -31,7 +32,13 @@ def main():
               type=click.Choice(['classic', 'random', 'shock', 'seasonal']))
 @click.option('--rounds', '-r', default=20, help='Number of rounds to play')
 @click.option('--verbose', '-v', is_flag=True, help='Verbose output')
-def run(model: str, scenario: str, rounds: int, verbose: bool):
+@click.option('--classic-mode', is_flag=True, help='Use 1960s settings (2-turn delays)')
+@click.option('--neutral-prompts', is_flag=True, help='Use neutral prompts instead of position-specific')
+@click.option('--memory', type=click.Choice(['none', 'short', 'medium', 'full']), default='short',
+              help='Memory strategy: none=0, short=5, medium=10, full=all decisions')
+@click.option('--plot', '-p', is_flag=True, help='Generate analysis plots')
+@click.option('--save-analysis', help='Save complete analysis to directory')
+def run(model: str, scenario: str, rounds: int, verbose: bool, classic_mode: bool, neutral_prompts: bool, memory: str, plot: bool, save_analysis: str):
     """Run a single Beer Game with Ollama agents"""
     
     # Check Ollama connection
@@ -42,10 +49,25 @@ def run(model: str, scenario: str, rounds: int, verbose: bool):
     
     console.print(f"[green]✅ Connected to Ollama server[/green]")
     
-    # Create agents
+    # Convert memory setting to window size
+    memory_windows = {
+        'none': 0,      # No history - pure reactive
+        'short': 5,     # Last 5 decisions
+        'medium': 10,   # Last 10 decisions  
+        'full': None    # Complete history
+    }
+    memory_window = memory_windows[memory]
+    
+    # Create agents with specified settings
     try:
-        agents = create_ollama_agents(model)
-        console.print(f"[green]✅ Created agents using model: {model}[/green]")
+        agents = create_ollama_agents(
+            model, 
+            neutral_prompt=neutral_prompts,
+            memory_window=memory_window
+        )
+        prompt_type = "Neutral" if neutral_prompts else "Position-specific"
+        memory_desc = f"{memory} memory ({memory_window if memory_window is not None else 'all'} decisions)"
+        console.print(f"[green]✅ Created agents: {model} ({prompt_type} prompts, {memory_desc})[/green]")
     except Exception as e:
         console.print(f"[red]❌ Failed to create agents: {e}[/red]")
         return
@@ -53,9 +75,20 @@ def run(model: str, scenario: str, rounds: int, verbose: bool):
     # Get demand pattern
     demand_pattern = DEMAND_PATTERNS.get(scenario, DEMAND_PATTERNS['classic'])[:rounds]
     
-    # Initialize game
-    game = BeerGame(agents, demand_pattern)
-    console.print(f"[blue]🎮 Starting Beer Game - Scenario: {scenario}, Rounds: {rounds}[/blue]")
+    # Initialize game with appropriate settings
+    if classic_mode:
+        from .beer_game.game import create_classic_beer_game
+        game = create_classic_beer_game(agents, demand_pattern)
+        mode_text = "Classic 1960s (2-turn delays)"
+    else:
+        game = BeerGame(agents, demand_pattern)
+        mode_text = "Modern (instant info, 1-turn shipping)"
+    
+    console.print(f"[blue]🎮 Starting Beer Game - Mode: {mode_text}[/blue]")
+    console.print(f"[blue]📊 Scenario: {scenario}, Rounds: {rounds}, Memory: {memory}[/blue]")
+    
+    # Store history for analysis
+    game_history = []
     
     # Run game with progress bar
     with Progress(
@@ -67,14 +100,38 @@ def run(model: str, scenario: str, rounds: int, verbose: bool):
         
         while not game.is_complete():
             state = game.step()
+            game_history.append(state)
             progress.update(task, advance=1)
             
             if verbose:
                 console.print(f"Round {state.round}: Cost=${state.total_cost:.2f}")
     
-    # Display results
+    # Get results
     results = game.get_results()
-    display_results(results)
+    
+    # Display results with history
+    display_results(results, game_history)
+    
+    # Agent names for analysis
+    prompt_suffix = "_neutral" if neutral_prompts else "_specific"
+    memory_suffix = f"_mem{memory}"
+    agent_names = {pos: f"{model}_{pos.value}{prompt_suffix}{memory_suffix}" for pos in Position}
+    
+    # Generate plots if requested
+    if plot:
+        console.print("\n[blue]📊 Generating analysis plots...[/blue]")
+        try:
+            plot_game_analysis(results, game_history, show_plot=True)
+        except Exception as e:
+            console.print(f"[red]❌ Failed to generate plots: {e}[/red]")
+    
+    # Save complete analysis if requested
+    if save_analysis:
+        console.print(f"\n[blue]💾 Saving complete analysis to {save_analysis}/[/blue]")
+        try:
+            create_game_summary_report(results, game_history, agent_names, save_analysis)
+        except Exception as e:
+            console.print(f"[red]❌ Failed to save analysis: {e}[/red]")
 
 
 @main.command()
@@ -189,49 +246,162 @@ def list_models():
         console.print(f"[red]❌ Failed to list models: {e}[/red]")
 
 
-@main.command() 
+@main.command()
+@click.option('--model', '-m', default='llama3.2', help='Ollama model name')
 @click.option('--scenario', '-s', default='classic', help='Demand scenario')
 @click.option('--rounds', '-r', default=20, help='Number of rounds')
-def benchmark(scenario: str, rounds: int):
-    """Run benchmark with multiple agent types"""
+@click.option('--runs', default=3, help='Number of runs per memory setting')
+def memory_study(model: str, scenario: str, rounds: int, runs: int):
+    """Compare all four memory strategies systematically"""
+    
+    if not test_ollama_connection():
+        console.print("[red]❌ Cannot connect to Ollama server[/red]")
+        return
+    
+    memory_strategies = {
+        'none': 0,      # Pure reactive - no history
+        'short': 5,     # Short-term memory (5 decisions) 
+        'medium': 10,   # Medium-term memory (10 decisions)
+        'full': None    # Full memory (all decisions)
+    }
     
     demand_pattern = DEMAND_PATTERNS.get(scenario, DEMAND_PATTERNS['classic'])[:rounds]
-    
-    # Test different agent types
-    agent_configs = [
-        ("Simple", lambda pos: SimpleAgent(pos)),
-        ("Optimal", lambda pos: OptimalAgent(pos)),
-        ("Random", lambda pos: RandomAgent(pos)),
-    ]
-    
-    # Add Ollama if available
-    if test_ollama_connection():
-        agent_configs.append(("Ollama-llama3.2", lambda pos: OllamaAgent(pos, "llama3.2")))
-    
     results = {}
+    total_games = len(memory_strategies) * runs
     
-    console.print(f"[blue]🏆 Running benchmark - Scenario: {scenario}[/blue]")
+    console.print(f"[blue]🧠 Memory Strategy Study - Model: {model}, Scenario: {scenario}[/blue]")
+    console.print(f"[blue]📊 Testing {len(memory_strategies)} memory strategies × {runs} runs = {total_games} games[/blue]")
     
-    for agent_name, agent_factory in agent_configs:
-        try:
-            agents = {pos: agent_factory(pos) for pos in Position}
-            game = BeerGame(agents, demand_pattern)
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console
+    ) as progress:
+        task = progress.add_task("Running memory study...", total=total_games)
+        
+        for memory_name, memory_window in memory_strategies.items():
+            console.print(f"\n[yellow]Testing {memory_name} memory strategy (window={memory_window})...[/yellow]")
+            strategy_results = []
             
-            while not game.is_complete():
-                game.step()
+            for run in range(runs):
+                try:
+                    # Create agents with specific memory window
+                    agents = create_ollama_agents(
+                        model_name=model,
+                        memory_window=memory_window
+                    )
+                    
+                    # Create and run game
+                    game = BeerGame(agents, demand_pattern)
+                    
+                    while not game.is_complete():
+                        game.step()
+                    
+                    # Get results
+                    game_results = game.get_results()
+                    strategy_results.append(game_results.summary())
+                    
+                    console.print(f"  Run {run+1}: Cost=${game_results.total_cost:.2f}, Service={game_results.service_level:.1%}")
+                    
+                except Exception as e:
+                    console.print(f"[red]❌ Failed run {run+1} for {memory_name}: {e}[/red]")
+                    # Continue with other runs
+                
+                progress.update(task, advance=1)
             
-            game_results = game.get_results()
-            results[agent_name] = game_results.summary()
-            console.print(f"[green]✅ Completed {agent_name}[/green]")
-            
-        except Exception as e:
-            console.print(f"[red]❌ Failed {agent_name}: {e}[/red]")
+            results[memory_name] = strategy_results
+            console.print(f"[green]✅ Completed {memory_name}: {len(strategy_results)}/{runs} successful runs[/green]")
     
-    # Display benchmark results
-    display_benchmark(results)
+    # Display memory comparison
+    console.print(f"\n[blue]📊 Completed memory study with {sum(len(v) for v in results.values())} total successful runs[/blue]")
+    display_memory_comparison(results)
 
 
-def display_results(results):
+def display_memory_comparison(results):
+    """Display memory strategy comparison results"""
+    
+    console.print("\n[bold blue]🧠 Memory Strategy Comparison[/bold blue]")
+    
+    # Check if we have any results
+    valid_results = {k: v for k, v in results.items() if v}  # Filter out empty results
+    
+    if not valid_results:
+        console.print("[red]❌ No successful runs to compare[/red]")
+        return
+    
+    table = Table()
+    table.add_column("Memory Strategy", style="cyan")
+    table.add_column("Description", style="white")
+    table.add_column("Avg Cost", style="green")
+    table.add_column("Avg Bullwhip", style="yellow")
+    table.add_column("Avg Service Level", style="blue")
+    table.add_column("Std Dev Cost", style="red")
+    
+    descriptions = {
+        'none': "Pure reactive (0 decisions)",
+        'short': "Short-term (5 decisions)", 
+        'medium': "Medium-term (10 decisions)",
+        'full': "Complete history (all decisions)"
+    }
+    
+    # Sort results by average cost
+    sorted_strategies = []
+    for strategy, runs in valid_results.items():
+        if runs:  # Double-check we have runs
+            avg_cost = sum(r['total_cost'] for r in runs) / len(runs)
+            sorted_strategies.append((avg_cost, strategy, runs))
+    
+    if not sorted_strategies:
+        console.print("[red]❌ No valid strategy results to display[/red]")
+        return
+        
+    sorted_strategies.sort()  # Sort by average cost
+    
+    for rank, (_, strategy, runs) in enumerate(sorted_strategies, 1):
+        avg_cost = sum(r['total_cost'] for r in runs) / len(runs)
+        avg_bullwhip = sum(r['bullwhip_ratio'] for r in runs) / len(runs)
+        avg_service = sum(r['service_level'] for r in runs) / len(runs)
+        
+        # Calculate standard deviation
+        costs = [r['total_cost'] for r in runs]
+        if len(costs) > 1:
+            std_cost = (sum((c - avg_cost) ** 2 for c in costs) / len(costs)) ** 0.5
+        else:
+            std_cost = 0.0
+        
+        rank_emoji = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else f"{rank}"
+        
+        table.add_row(
+            f"{rank_emoji} {strategy}",
+            descriptions.get(strategy, ""),
+            f"${avg_cost:.2f}",
+            f"{avg_bullwhip:.2f}",
+            f"{avg_service:.1%}",
+            f"±${std_cost:.2f}"
+        )
+    
+    console.print(table)
+    
+    # Summary insights only if we have multiple strategies
+    if len(sorted_strategies) > 1:
+        console.print("\n[bold]Memory Strategy Insights:[/bold]")
+        best_strategy = sorted_strategies[0][1]  # Best by cost
+        worst_strategy = sorted_strategies[-1][1]  # Worst by cost
+        
+        console.print(f"🎯 Best performing: {best_strategy} memory")
+        console.print(f"📉 Worst performing: {worst_strategy} memory")
+        
+        # Show cost differences
+        best_cost = sorted_strategies[0][0]
+        worst_cost = sorted_strategies[-1][0]
+        improvement = ((worst_cost - best_cost) / worst_cost) * 100
+        
+        console.print(f"💰 Performance gap: {improvement:.1f}% cost difference between best and worst")
+    else:
+        console.print(f"\n[yellow]⚠️ Only one strategy completed successfully: {sorted_strategies[0][1]}[/yellow]")
+
+
+def display_results(results, history=None):
     """Display game results in a formatted table"""
     
     console.print("\n[bold blue]🏁 Game Results[/bold blue]")
@@ -267,6 +437,32 @@ def display_results(results):
         )
     
     console.print(cost_table)
+    
+    # Show agent decision patterns if history available
+    if history:
+        console.print("\n[bold]Agent Decision History (Last 10 Rounds):[/bold]")
+        decision_table = Table()
+        decision_table.add_column("Round", style="cyan")
+        decision_table.add_column("Customer Demand", style="red")
+        
+        for pos in Position:
+            decision_table.add_column(f"{pos.value.title()}", style="green")
+        
+        # Show last 10 rounds
+        start_round = max(0, len(history) - 10)
+        for i in range(start_round, len(history)):
+            state = history[i]
+            row = [str(state.round), str(state.customer_demand)]
+            
+            for pos in Position:
+                player = state.players[pos]
+                decision = player.outgoing_order
+                # Show inventory in parentheses for context
+                row.append(f"{decision} (inv:{player.inventory})")
+            
+            decision_table.add_row(*row)
+        
+        console.print(decision_table)
 
 
 def display_comparison(results):

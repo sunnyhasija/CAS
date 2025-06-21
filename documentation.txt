@@ -3,16 +3,19 @@
 ## Project Overview
 SCM-Arena is a benchmark platform for evaluating Large Language Models on supply chain management coordination tasks, starting with the multi-agent Beer Game simulation.
 
-## Current Status: Core Implementation Complete
-- **Phase**: Phase 1 - Core Beer Game Engine + Ollama Integration ✅
+## Current Status: Complete Research Framework with Memory Studies
+- **Phase**: Phase 1+ - Advanced Research Platform with Multi-Dimensional Analysis ✅
+- **Recent Updates**: 
+  - Memory strategy research framework (4 memory types)
+  - Position-specific vs neutral prompting comparison
+  - Modern vs classic Beer Game settings
+  - Comprehensive analysis and visualization pipeline
 - **Completed**: 
-  - Project structure created
-  - Beer Game engine implemented
-  - Agent interfaces and basic agents created
-  - Ollama integration working
-  - CLI interface built
-  - Basic example created
-- **Next Steps**: Testing, Poetry installation, first game runs
+  - Four memory strategies: none (reactive), short (5), medium (10), full (all)
+  - Business-realistic position-specific prompting
+  - Complete A/B testing framework for all variables
+  - Rich visualization and statistical analysis
+- **Next Steps**: Run systematic memory studies, analyze LLM coordination patterns
 
 ## Architecture
 
@@ -409,7 +412,39 @@ poetry run python -m scm_arena.cli run --scenario trend
 poetry run python -m scm_arena.cli run --scenario complex
 ```
 
-### Advanced Usage Examples
+### Enhanced Analysis Commands
+
+#### Visualization & Analysis
+```bash
+# Run game with live plots
+poetry run python -m scm_arena.cli run --model llama3.2:latest --plot
+
+# Save complete analysis report
+poetry run python -m scm_arena.cli run --model llama3.2:latest --save-analysis results_folder
+
+# Compare modern vs classic settings
+poetry run python -m scm_arena.cli run --model llama3.2:latest --plot --rounds 20
+poetry run python -m scm_arena.cli run --model llama3.2:latest --plot --rounds 20 --classic-mode
+
+# Detailed agent analysis
+poetry run python -m scm_arena.cli run --model llama3.2:latest --save-analysis llm_analysis --verbose
+```
+
+#### Analysis Features
+- **📊 Real-time Plots**: Inventory, costs, orders, service levels
+- **🧠 Agent Decision Analysis**: Decision patterns, volatility, responsiveness
+- **🌊 Bullwhip Effect Visualization**: Order amplification through supply chain
+- **📈 Historical Tracking**: Complete decision history for each agent
+- **💾 Export Reports**: Save plots, data, and summary statistics
+
+#### Modern vs Classic Settings
+```bash
+# Modern (default): Instant information, 1-turn shipping
+poetry run python -m scm_arena.cli run --model llama3.2:latest
+
+# Classic 1960s: 2-turn information + shipping delays
+poetry run python -m scm_arena.cli run --model llama3.2:latest --classic-mode
+```
 
 #### Research Workflow
 ```bash

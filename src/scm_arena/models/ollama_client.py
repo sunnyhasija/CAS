@@ -28,7 +28,8 @@ class OllamaAgent(Agent):
         temperature: float = 0.1,
         max_retries: int = 3,
         timeout: float = 30.0,
-        system_prompt: Optional[str] = None,
+        neutral_prompt: bool = False,
+        memory_window: Optional[int] = 5,
         name: Optional[str] = None
     ):
         """
@@ -41,7 +42,8 @@ class OllamaAgent(Agent):
             temperature: LLM temperature (0.0 = deterministic, 1.0 = creative)
             max_retries: Maximum API retry attempts
             timeout: Request timeout in seconds
-            system_prompt: Custom system prompt (uses default if None)
+            neutral_prompt: Use neutral prompts instead of position-specific ones
+            memory_window: Number of past decisions to include (None = all, 0 = none)
             name: Optional agent name
         """
         super().__init__(position, name or f"ollama_{model_name}_{position.value}")
@@ -50,41 +52,124 @@ class OllamaAgent(Agent):
         self.temperature = temperature
         self.max_retries = max_retries
         self.timeout = timeout
+        self.neutral_prompt = neutral_prompt
+        self.memory_window = memory_window
         
         # API endpoints
         self.chat_url = f"{self.base_url}/api/chat"
-        self.generate_url = f"{self.base_url}/api/generate"
         
         # Set up system prompt
-        self.system_prompt = system_prompt or self._create_default_system_prompt()
+        if self.neutral_prompt:
+            self.system_prompt = self._create_neutral_system_prompt()
+        else:
+            self.system_prompt = self._create_default_system_prompt()
         
         # Request session for connection pooling
         self.session = requests.Session()
         
     def _create_default_system_prompt(self) -> str:
-        """Create default system prompt for the agent's position"""
-        position_context = {
-            Position.RETAILER: "You serve customers directly and must balance having enough inventory to meet demand while minimizing holding costs.",
-            Position.WHOLESALER: "You supply retailers and must anticipate their ordering patterns while managing your own inventory efficiently.", 
-            Position.DISTRIBUTOR: "You coordinate between wholesalers and manufacturers, helping smooth demand variability in the supply chain.",
-            Position.MANUFACTURER: "You produce goods for the entire supply chain and must plan production to meet downstream demand."
-        }
+        """Create position-specific system prompt based on business realities"""
         
-        return f"""You are playing the Beer Game, a supply chain coordination simulation. You are the {self.position.value.upper()} in a 4-tier supply chain (Retailer → Wholesaler → Distributor → Manufacturer).
+        position_prompts = {
+            Position.RETAILER: """You are the RETAILER in a beer supply chain. Your primary objective is to fulfill ALL customer demand to maximize sales revenue and customer satisfaction.
 
-ROLE: {position_context[self.position]}
+BUSINESS PRIORITIES:
+1. NEVER lose a sale - stockouts directly hurt your revenue and customer relationships
+2. Minimize holding costs, but service level is more important than inventory costs  
+3. You see actual customer demand - use this critical information advantage
+4. React quickly to demand changes - customers won't wait
+
+DECISION FRAMEWORK:
+- Analyze customer demand patterns carefully
+- Order enough to avoid stockouts, even if it means higher inventory
+- Consider demand seasonality and trends
+- Balance: High service level > Low inventory costs
+
+Your success = Customer satisfaction + Sales maximization""",
+
+            Position.WHOLESALER: """You are the WHOLESALER in a beer supply chain. Your role is to efficiently serve retailers while optimizing your distribution operations.
+
+BUSINESS PRIORITIES:
+1. Maintain high fill rates to retailers - they depend on you for their success
+2. Optimize warehouse utilization and inventory turns
+3. Smooth out retailer demand volatility through intelligent buffering  
+4. Build reliable supply relationships upstream and downstream
+
+DECISION FRAMEWORK:
+- Anticipate retailer needs based on their ordering patterns
+- Maintain safety stock for reliable service but avoid excessive inventory
+- Look for trends in retailer orders - are they seasonal or one-time spikes?
+- Balance: Reliable service to retailers + Operational efficiency
+
+Your success = Retailer satisfaction + Operational efficiency""",
+
+            Position.DISTRIBUTOR: """You are the DISTRIBUTOR in a beer supply chain. Your role is to coordinate regional supply networks and optimize logistics across your territory.
+
+BUSINESS PRIORITIES:
+1. Ensure consistent supply availability across your distribution network
+2. Minimize transportation and storage costs through efficient planning
+3. Coordinate between multiple wholesalers and manufacturing capacity
+4. Plan for regional demand variations and logistics constraints
+
+DECISION FRAMEWORK:
+- Think strategically about supply chain flow and bottlenecks
+- Consider transportation lead times and batch economics
+- Smooth demand signals between wholesalers and manufacturer
+- Plan for capacity constraints and delivery schedules
+
+Your success = Network reliability + Logistics efficiency""",
+
+            Position.MANUFACTURER: """You are the MANUFACTURER in a beer supply chain. Your role is to plan production efficiently while meeting downstream demand through optimal capacity management.
+
+BUSINESS PRIORITIES:
+1. Optimize production efficiency and capacity utilization
+2. Plan production runs for economies of scale and cost minimization
+3. Ensure adequate supply to meet distributor demands
+4. Balance production smoothing with demand responsiveness
+
+DECISION FRAMEWORK:
+- Think in terms of production batches and capacity constraints
+- Consider brewing lead times and production scheduling
+- Avoid production volatility - smooth operations reduce costs
+- Plan for demand patterns but don't overreact to short-term spikes
+
+Your success = Production efficiency + Demand fulfillment"""
+        }
+
+        base_prompt = f"""
+{position_prompts[self.position]}
 
 GAME RULES:
-- Each round, you must decide how many units to order from your upstream supplier
-- There is a 2-week delay for both information (orders) and shipments
+- Each round, decide how many units to order from your upstream supplier
 - Costs: $1 per unit held in inventory, $2 per unit of backlog (unfulfilled orders)
-- Goal: Minimize total supply chain cost through effective coordination
+- There are shipping delays in the system
+- Goal: Optimize YOUR position's performance while supporting overall supply chain success
+
+RESPONSE FORMAT:
+You must respond with a JSON object containing only your order decision:
+{{"order": [integer_value]}}
+
+The order must be a non-negative integer. Provide no other text outside the JSON."""
+
+        return base_prompt
+    
+    def _create_neutral_system_prompt(self) -> str:
+        """Create neutral system prompt without position-specific biasing"""
+        return f"""You are the {self.position.value.upper()} in a supply chain coordination simulation.
+
+OBJECTIVE: Minimize your costs while maintaining good supply chain performance.
+
+GAME RULES:
+- Each round, decide how many units to order from your upstream supplier
+- Costs: $1 per unit held in inventory, $2 per unit of backlog (unfulfilled orders)  
+- There are shipping delays in the system
+- Goal: Balance inventory costs with service level
 
 DECISION PROCESS:
-1. Analyze current inventory, backlog, and incoming orders
-2. Consider the delays in the system
-3. Estimate future demand based on available information
-4. Place an order that balances service level and cost
+1. Analyze your current inventory and backlog levels
+2. Consider incoming orders from your downstream partner
+3. Estimate appropriate order quantity for next round
+4. Balance avoiding stockouts with minimizing excess inventory
 
 RESPONSE FORMAT:
 You must respond with a JSON object containing only your order decision:
@@ -129,7 +214,7 @@ The order must be a non-negative integer. Provide no other text outside the JSON
         return self._fallback_decision(game_state)
     
     def _create_user_prompt(self, game_state: Dict[str, Any]) -> str:
-        """Create user prompt from game state"""
+        """Create user prompt from game state with configurable memory"""
         prompt_parts = [
             f"ROUND {game_state['round']}",
             f"Position: {game_state['position'].upper()}",
@@ -144,12 +229,31 @@ The order must be a non-negative integer. Provide no other text outside the JSON
         if self.position == Position.RETAILER and "customer_demand" in game_state:
             prompt_parts.append(f"Customer demand: {game_state['customer_demand']} units")
         
-        # Add decision history if available
-        if game_state.get("decision_history"):
-            history = game_state["decision_history"][-5:]  # Last 5 decisions
-            prompt_parts.append(f"Recent order history: {history}")
+        # Add decision history based on memory window setting
+        if game_state.get("decision_history") and self.memory_window != 0:
+            full_history = game_state["decision_history"]
+            
+            if self.memory_window is None:
+                # Full memory - all decisions
+                history = full_history
+                memory_type = "complete order history"
+            elif self.memory_window > 0:
+                # Limited memory window
+                history = full_history[-self.memory_window:]
+                memory_type = f"recent {len(history)} order(s)"
+            
+            if history:
+                prompt_parts.append(f"Your {memory_type}: {history}")
         
-        prompt_parts.append("\nHow many units should you order this round?")
+        # Add memory context to decision prompt
+        if self.memory_window == 0:
+            prompt_parts.append("\nMake your order decision based on current round information only.")
+        elif self.memory_window is None:
+            prompt_parts.append("\nConsider your complete order history when making this decision.")
+        else:
+            prompt_parts.append(f"\nConsider your recent {self.memory_window} order(s) when making this decision.")
+        
+        prompt_parts.append("How many units should you order this round?")
         
         return "\n".join(prompt_parts)
     
@@ -259,6 +363,8 @@ The order must be a non-negative integer. Provide no other text outside the JSON
 def create_ollama_agents(
     model_name: str = "llama3.2",
     base_url: str = "http://localhost:11434",
+    neutral_prompt: bool = False,
+    memory_window: Optional[int] = 5,
     **kwargs
 ) -> Dict[Position, OllamaAgent]:
     """
@@ -267,13 +373,22 @@ def create_ollama_agents(
     Args:
         model_name: Ollama model to use
         base_url: Ollama server URL
+        neutral_prompt: Use neutral prompts instead of position-specific ones
+        memory_window: Number of past decisions to include (None = all, 0 = none, 5 = default)
         **kwargs: Additional arguments passed to OllamaAgent
         
     Returns:
         Dictionary mapping positions to agent instances
     """
     return {
-        position: OllamaAgent(position, model_name, base_url, **kwargs)
+        position: OllamaAgent(
+            position, 
+            model_name, 
+            base_url, 
+            neutral_prompt=neutral_prompt,
+            memory_window=memory_window,
+            **kwargs
+        )
         for position in Position
     }
 

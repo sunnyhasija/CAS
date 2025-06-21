@@ -1,0 +1,19 @@
+BEER GAME ANALYSIS SUMMARY
+==================================================
+
+Total Cost: $1868.00
+Cost per Round: $93.40
+Bullwhip Ratio: 1.00
+Service Level: 0.0%
+
+INDIVIDUAL COSTS:
+--------------------
+Retailer     (llama3.2:latest_retailer): $1120.00 (60.0%)
+Wholesaler   (llama3.2:latest_wholesaler): $960.00 (51.4%)
+Distributor  (llama3.2:latest_distributor): $ 60.00 ( 3.2%)
+Manufacturer (llama3.2:latest_manufacturer): $620.00 (33.2%)
+
+GAME SETTINGS:
+---------------
+Rounds Played: 20
+Demand Pattern: [4, 4, 4, 4, 8, 8, 8, 8, 8, 8]...

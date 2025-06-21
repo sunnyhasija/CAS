@@ -1,9 +1,11 @@
 """
-Core Beer Game simulation engine.
+Core Beer Game simulation engine - MODERN SETTINGS.
 
-The Beer Game is a classic supply chain coordination game where 4 agents
-(Retailer, Wholesaler, Distributor, Manufacturer) must coordinate to minimize
-total system cost while dealing with information delays and uncertainty.
+Updated to reflect modern supply chain realities:
+- No information delays (instant order visibility)
+- 1-turn shipping/production delay
+- This represents real-world conditions where information flows instantly
+  but physical goods still take time to move/produce.
 """
 
 from typing import List, Dict, Optional, Tuple
@@ -95,13 +97,17 @@ class GameResults:
 
 class BeerGame:
     """
-    Core Beer Game simulation engine.
+    Core Beer Game simulation engine - MODERN SETTINGS.
     
-    Implements the classic 4-tier supply chain coordination game with:
-    - 2-week shipping delays
-    - 2-week information delays  
+    Implements modern supply chain coordination with:
+    - NO information delays (instant order visibility)
+    - 1-turn shipping delays (order turn n, receive turn n+1)
+    - 1-turn production delay for manufacturer
     - $1/unit holding cost, $2/unit backorder cost
     - Weekly decision cycles
+    
+    This reflects real-world conditions where information flows instantly
+    via modern systems, but physical goods still take time to move.
     """
     
     def __init__(
@@ -112,10 +118,12 @@ class BeerGame:
         initial_backlog: int = 0,
         holding_cost: float = 1.0,
         backorder_cost: float = 2.0,
-        max_rounds: int = 50
+        max_rounds: int = 50,
+        information_delay: int = 0,  # Modern: instant information
+        shipping_delay: int = 1      # Modern: 1-turn shipping
     ):
         """
-        Initialize a new Beer Game.
+        Initialize a new Beer Game with modern settings.
         
         Args:
             agents: Dictionary mapping positions to agent instances
@@ -125,12 +133,16 @@ class BeerGame:
             holding_cost: Cost per unit of inventory held
             backorder_cost: Cost per unit of backlog
             max_rounds: Maximum number of rounds to play
+            information_delay: Turns for order information to flow (0 = instant)
+            shipping_delay: Turns for physical goods to move (1 = next turn)
         """
         self.agents = agents
         self.demand_pattern = demand_pattern
         self.holding_cost = holding_cost
         self.backorder_cost = backorder_cost
         self.max_rounds = max_rounds
+        self.information_delay = information_delay
+        self.shipping_delay = shipping_delay
         
         # Initialize game state
         self.current_round = 0
@@ -150,19 +162,26 @@ class BeerGame:
             for position in Position
         }
         
-        # Shipping and information delay queues (2 weeks each)
+        # Modern shipping delays (1-turn delay)
+        # This represents the time for physical goods to move/be produced
         self.shipping_delays = {
-            Position.RETAILER: [4, 4],  # From wholesaler
-            Position.WHOLESALER: [4, 4],  # From distributor  
-            Position.DISTRIBUTOR: [4, 4],  # From manufacturer
-            Position.MANUFACTURER: [4, 4],  # Production
+            Position.RETAILER: [4],     # From wholesaler
+            Position.WHOLESALER: [4],   # From distributor  
+            Position.DISTRIBUTOR: [4],  # From manufacturer
+            Position.MANUFACTURER: [4], # Production time
         }
         
-        self.order_delays = {
-            Position.WHOLESALER: [4, 4],  # From retailer
-            Position.DISTRIBUTOR: [4, 4],  # From wholesaler
-            Position.MANUFACTURER: [4, 4],  # From distributor
-        }
+        # Modern information flow (instant by default)
+        # Orders are visible immediately unless information_delay > 0
+        if self.information_delay > 0:
+            self.order_delays = {
+                Position.WHOLESALER: [4] * self.information_delay,
+                Position.DISTRIBUTOR: [4] * self.information_delay,
+                Position.MANUFACTURER: [4] * self.information_delay,
+            }
+        else:
+            # Instant information flow
+            self.order_delays = {}
         
         # Game history
         self.history: List[GameState] = []
@@ -178,12 +197,7 @@ class BeerGame:
         )
     
     def step(self) -> GameState:
-        """
-        Execute one round of the Beer Game.
-        
-        Returns:
-            Current game state after the step
-        """
+        """Execute one round of the Beer Game."""
         if self.phase != GamePhase.RUNNING and self.phase != GamePhase.SETUP:
             raise ValueError("Cannot step a completed game")
             
@@ -202,7 +216,7 @@ class BeerGame:
         current_state = self.get_current_state()
         decisions = self._get_agent_decisions(current_state)
         
-        # 4. Process new orders through delay queues
+        # 4. Process new orders (modern: instant or delayed information)
         self._process_new_orders(decisions)
         
         # 5. Update history
@@ -261,8 +275,8 @@ class BeerGame:
     def _process_shipments(self) -> None:
         """Process incoming shipments from delay queues"""
         for position in Position:
-            if position in self.shipping_delays:
-                # Receive shipment that was sent 2 rounds ago
+            if position in self.shipping_delays and self.shipping_delays[position]:
+                # Receive shipment from 1-turn ago (or longer if configured)
                 shipment = self.shipping_delays[position].pop(0)
                 self.players[position].inventory += shipment
     
@@ -310,28 +324,42 @@ class BeerGame:
         return decisions
     
     def _process_new_orders(self, decisions: Dict[Position, int]) -> None:
-        """Process new orders through information and shipping delay queues"""
-        # Update order delays (information flow)
-        if Position.RETAILER in decisions:
-            self.order_delays[Position.WHOLESALER].append(decisions[Position.RETAILER])
-            
-        if Position.WHOLESALER in decisions:
-            self.order_delays[Position.DISTRIBUTOR].append(decisions[Position.WHOLESALER])
-            
-        if Position.DISTRIBUTOR in decisions:
-            self.order_delays[Position.MANUFACTURER].append(decisions[Position.DISTRIBUTOR])
+        """Process new orders - modern instant information flow"""
         
-        # Process orders that arrive this round (2-round delay)
-        for downstream, upstream in [
-            (Position.RETAILER, Position.WHOLESALER),
-            (Position.WHOLESALER, Position.DISTRIBUTOR), 
-            (Position.DISTRIBUTOR, Position.MANUFACTURER)
-        ]:
-            if upstream in self.order_delays:
-                arriving_order = self.order_delays[upstream].pop(0)
-                self.players[upstream].incoming_order = arriving_order
+        if self.information_delay == 0:
+            # MODERN: Instant information flow
+            # Orders are visible immediately to upstream players
+            if Position.RETAILER in decisions:
+                self.players[Position.WHOLESALER].incoming_order = decisions[Position.RETAILER]
+                
+            if Position.WHOLESALER in decisions:
+                self.players[Position.DISTRIBUTOR].incoming_order = decisions[Position.WHOLESALER]
+                
+            if Position.DISTRIBUTOR in decisions:
+                self.players[Position.MANUFACTURER].incoming_order = decisions[Position.DISTRIBUTOR]
+        else:
+            # CLASSIC: Information delays (for comparison studies)
+            # Update order delays (information flow)
+            if Position.RETAILER in decisions:
+                self.order_delays[Position.WHOLESALER].append(decisions[Position.RETAILER])
+                
+            if Position.WHOLESALER in decisions:
+                self.order_delays[Position.DISTRIBUTOR].append(decisions[Position.WHOLESALER])
+                
+            if Position.DISTRIBUTOR in decisions:
+                self.order_delays[Position.MANUFACTURER].append(decisions[Position.DISTRIBUTOR])
+            
+            # Process orders that arrive this round (with delay)
+            for downstream, upstream in [
+                (Position.RETAILER, Position.WHOLESALER),
+                (Position.WHOLESALER, Position.DISTRIBUTOR), 
+                (Position.DISTRIBUTOR, Position.MANUFACTURER)
+            ]:
+                if upstream in self.order_delays and self.order_delays[upstream]:
+                    arriving_order = self.order_delays[upstream].pop(0)
+                    self.players[upstream].incoming_order = arriving_order
         
-        # Update shipping delays (production/shipping)
+        # Update shipping delays (production/shipping) - always has physical delay
         for position in Position:
             if position in decisions:
                 self.shipping_delays[position].append(decisions[position])
@@ -373,3 +401,23 @@ class BeerGame:
         if round_num <= 0 or round_num > len(self.demand_pattern):
             return 0
         return self.demand_pattern[round_num - 1]
+
+
+def create_classic_beer_game(
+    agents: Dict[Position, Agent],
+    demand_pattern: List[int],
+    **kwargs
+) -> BeerGame:
+    """
+    Create Beer Game with classic 1960s settings for comparison studies.
+    
+    - 2-turn information delays
+    - 2-turn shipping delays
+    """
+    return BeerGame(
+        agents, 
+        demand_pattern, 
+        information_delay=2, 
+        shipping_delay=2,
+        **kwargs
+    )
