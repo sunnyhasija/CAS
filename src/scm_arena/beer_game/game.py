@@ -1,423 +1,520 @@
 """
-Core Beer Game simulation engine - MODERN SETTINGS.
+Beer Game simulation engine with standard academic cost structure.
 
-Updated to reflect modern supply chain realities:
-- No information delays (instant order visibility)
-- 1-turn shipping/production delay
-- This represents real-world conditions where information flows instantly
-  but physical goods still take time to move/produce.
+This module implements the core Beer Game logic with the traditional
+$1 holding cost : $2 backorder cost ratio from academic literature.
 """
 
-from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Any
 from enum import Enum
-import numpy as np
+import copy
+
 from .agents import Agent, Position
 
 
-class GamePhase(Enum):
-    """Current phase of the game"""
-    SETUP = "setup"
-    RUNNING = "running"
-    COMPLETED = "completed"
+# Standard academic cost parameters
+HOLDING_COST_PER_UNIT = 1.0    # $1 per unit per period
+BACKORDER_COST_PER_UNIT = 2.0  # $2 per unit per period
+
+
+class VisibilityLevel(Enum):
+    """Information visibility levels in the supply chain"""
+    LOCAL = "local"              # See only own state (classic)
+    ADJACENT = "adjacent"        # See own + immediate upstream/downstream
+    FULL = "full"               # See entire supply chain state
 
 
 @dataclass
 class PlayerState:
     """State of a single player in the supply chain"""
     position: Position
-    inventory: int
-    backlog: int  # Unfulfilled orders
-    incoming_order: int  # Order from downstream player
-    outgoing_order: int  # Order to upstream player
-    cost: float
-    decisions: List[int] = field(default_factory=list)  # History of order decisions
+    inventory: int = 12           # Starting inventory
+    backlog: int = 0             # Unfulfilled orders
+    incoming_order: int = 4      # Order from downstream
+    outgoing_order: int = 4      # Order to upstream
+    
+    # Shipping delays (2-period delay)
+    shipping_delay_1: int = 4    # Arriving next period
+    shipping_delay_2: int = 4    # Arriving in 2 periods
+    
+    # Order delays (2-period delay)
+    order_delay_1: int = 4       # Order placed 1 period ago
+    order_delay_2: int = 4       # Order placed 2 periods ago
+    
+    # Cost tracking
+    period_cost: float = 0.0
+    total_cost: float = 0.0
+    cost: float = 0.0  # Alias for compatibility
+    
+    # Decision history
+    decision_history: List[int] = None
+    
+    def __post_init__(self):
+        if self.decision_history is None:
+            self.decision_history = []
 
 
 @dataclass
 class GameState:
-    """Complete state of the Beer Game at a given round"""
+    """Complete state of the Beer Game at one point in time"""
     round: int
-    phase: GamePhase
     players: Dict[Position, PlayerState]
     customer_demand: int
     total_cost: float
+    is_complete: bool = False
     
-    def get_player_state(self, position: Position) -> PlayerState:
-        """Get state for a specific player position"""
-        return self.players[position]
-    
-    def get_observable_state(self, position: Position) -> Dict:
-        """Get the observable state for a player (what they can see)"""
+    def to_agent_view(self, position: Position, visibility: VisibilityLevel = VisibilityLevel.LOCAL, 
+                      state_history: List['GameState'] = None) -> Dict[str, Any]:
+        """Convert to agent-visible state based on visibility level and history"""
         player = self.players[position]
         
-        # Base information every player can see
-        observable = {
+        # Base state (always visible)
+        state = {
             "round": self.round,
             "position": position.value,
             "inventory": player.inventory,
             "backlog": player.backlog,
             "incoming_order": player.incoming_order,
             "last_outgoing_order": player.outgoing_order,
-            "round_cost": player.cost,
-            "decision_history": player.decisions.copy(),
+            "round_cost": player.period_cost,
+            "decision_history": player.decision_history.copy(),
         }
         
         # Add customer demand for retailer
         if position == Position.RETAILER:
-            observable["customer_demand"] = self.customer_demand
+            state["customer_demand"] = self.customer_demand
+        
+        # Add visibility-based information
+        if visibility != VisibilityLevel.LOCAL:
+            visible_positions = self._get_visible_positions(position, visibility)
             
-        return observable
+            if visible_positions:
+                # Current state visibility
+                state["visible_supply_chain"] = {}
+                for vis_pos in visible_positions:
+                    vis_player = self.players[vis_pos]
+                    state["visible_supply_chain"][vis_pos.value] = {
+                        "inventory": vis_player.inventory,
+                        "backlog": vis_player.backlog,
+                        "incoming_order": vis_player.incoming_order,
+                        "outgoing_order": vis_player.outgoing_order,
+                        "cost": vis_player.period_cost,
+                        "decision_history": vis_player.decision_history.copy()
+                    }
+                
+                # Historical visibility if state_history provided
+                if state_history:
+                    state["visible_history"] = self._get_visible_history(
+                        position, visible_positions, state_history
+                    )
+        
+        # Add system-wide metrics for full visibility
+        if visibility == VisibilityLevel.FULL:
+            state["system_metrics"] = {
+                "total_system_cost": self.total_cost,
+                "total_system_inventory": sum(p.inventory for p in self.players.values()),
+                "total_system_backlog": sum(p.backlog for p in self.players.values()),
+                "customer_demand": self.customer_demand
+            }
+            
+        return state
+    
+    def _get_visible_positions(self, position: Position, visibility: VisibilityLevel) -> List[Position]:
+        """Get positions visible to given position based on visibility level"""
+        if visibility == VisibilityLevel.LOCAL:
+            return []
+        
+        elif visibility == VisibilityLevel.ADJACENT:
+            positions = []
+            downstream = position.get_downstream_position()
+            upstream = position.get_upstream_position()
+            if downstream:
+                positions.append(downstream)
+            if upstream:
+                positions.append(upstream)
+            return positions
+                
+        elif visibility == VisibilityLevel.FULL:
+            # All other positions
+            return [pos for pos in Position if pos != position]
+        
+        return []
+    
+    def _get_visible_history(self, position: Position, visible_positions: List[Position], 
+                           state_history: List['GameState']) -> Dict[str, List[Dict]]:
+        """Get historical states for visible positions"""
+        history = {}
+        
+        for vis_pos in visible_positions:
+            position_history = []
+            for past_state in state_history:
+                if vis_pos in past_state.players:
+                    past_player = past_state.players[vis_pos]
+                    position_history.append({
+                        "round": past_state.round,
+                        "inventory": past_player.inventory,
+                        "backlog": past_player.backlog,
+                        "incoming_order": past_player.incoming_order,
+                        "outgoing_order": past_player.outgoing_order,
+                        "cost": past_player.period_cost
+                    })
+            history[vis_pos.value] = position_history
+        
+        return history
 
 
 @dataclass
 class GameResults:
-    """Final results of a completed Beer Game"""
+    """Final results and metrics from a completed game"""
     total_cost: float
     individual_costs: Dict[Position, float]
-    bullwhip_ratio: float
     service_level: float
-    rounds_played: int
-    demand_pattern: List[int]
-    final_inventories: Dict[Position, int]
+    bullwhip_ratio: float
+    total_rounds: int
     
-    def summary(self) -> Dict:
-        """Get a summary of key metrics"""
+    def summary(self) -> Dict[str, Any]:
+        """Get summary statistics"""
         return {
             "total_cost": self.total_cost,
-            "cost_per_round": self.total_cost / self.rounds_played,
-            "bullwhip_ratio": self.bullwhip_ratio,
+            "cost_per_round": self.total_cost / self.total_rounds,
             "service_level": self.service_level,
-            "retailer_cost": self.individual_costs[Position.RETAILER],
-            "wholesaler_cost": self.individual_costs[Position.WHOLESALER],
-            "distributor_cost": self.individual_costs[Position.DISTRIBUTOR],
-            "manufacturer_cost": self.individual_costs[Position.MANUFACTURER],
+            "bullwhip_ratio": self.bullwhip_ratio,
+            **{f"{pos.value}_cost": cost for pos, cost in self.individual_costs.items()}
         }
 
 
 class BeerGame:
     """
-    Core Beer Game simulation engine - MODERN SETTINGS.
+    Beer Game simulation engine implementing the classic supply chain coordination game.
     
-    Implements modern supply chain coordination with:
-    - NO information delays (instant order visibility)
-    - 1-turn shipping delays (order turn n, receive turn n+1)
-    - 1-turn production delay for manufacturer
-    - $1/unit holding cost, $2/unit backorder cost
-    - Weekly decision cycles
+    Uses standard academic cost structure:
+    - Holding cost: $1 per unit per period
+    - Backorder cost: $2 per unit per period
     
-    This reflects real-world conditions where information flows instantly
-    via modern systems, but physical goods still take time to move.
+    Supports multiple information visibility levels for research.
     """
     
     def __init__(
-        self,
-        agents: Dict[Position, Agent],
+        self, 
+        agents: Dict[Position, Agent], 
         demand_pattern: List[int],
-        initial_inventory: int = 12,
-        initial_backlog: int = 0,
-        holding_cost: float = 1.0,
-        backorder_cost: float = 2.0,
-        max_rounds: int = 50,
-        information_delay: int = 0,  # Modern: instant information
-        shipping_delay: int = 1      # Modern: 1-turn shipping
+        classic_mode: bool = False,
+        visibility_level: VisibilityLevel = VisibilityLevel.LOCAL,
+        holding_cost: float = HOLDING_COST_PER_UNIT,
+        backorder_cost: float = BACKORDER_COST_PER_UNIT
     ):
         """
-        Initialize a new Beer Game with modern settings.
+        Initialize Beer Game.
         
         Args:
             agents: Dictionary mapping positions to agent instances
             demand_pattern: List of customer demands for each round
-            initial_inventory: Starting inventory for each player
-            initial_backlog: Starting backlog for each player
-            holding_cost: Cost per unit of inventory held
-            backorder_cost: Cost per unit of backlog
-            max_rounds: Maximum number of rounds to play
-            information_delay: Turns for order information to flow (0 = instant)
-            shipping_delay: Turns for physical goods to move (1 = next turn)
+            classic_mode: If True, use classic 2-period information delays
+            visibility_level: Information visibility level across supply chain
+            holding_cost: Cost per unit of inventory per period
+            backorder_cost: Cost per unit of backlog per period
         """
         self.agents = agents
         self.demand_pattern = demand_pattern
+        self.classic_mode = classic_mode
+        self.visibility_level = visibility_level
         self.holding_cost = holding_cost
         self.backorder_cost = backorder_cost
-        self.max_rounds = max_rounds
-        self.information_delay = information_delay
-        self.shipping_delay = shipping_delay
+        
+        # Validate agents
+        required_positions = set(Position)
+        provided_positions = set(agents.keys())
+        if required_positions != provided_positions:
+            missing = required_positions - provided_positions
+            extra = provided_positions - required_positions
+            raise ValueError(f"Invalid agents. Missing: {missing}, Extra: {extra}")
         
         # Initialize game state
-        self.current_round = 0
-        self.phase = GamePhase.SETUP
-        self.total_cost = 0.0
+        self.round = 0
+        self.state_history: List[GameState] = []
+        self.current_state = self._initialize_game_state()
         
-        # Initialize player states
-        self.players = {
-            position: PlayerState(
+    def _initialize_game_state(self) -> GameState:
+        """Initialize starting state with standard parameters"""
+        players = {}
+        
+        for position in Position:
+            players[position] = PlayerState(
                 position=position,
-                inventory=initial_inventory,
-                backlog=initial_backlog,
-                incoming_order=4,  # Initial steady state
+                inventory=12,           # Standard starting inventory
+                backlog=0,
+                incoming_order=4,       # Standard starting order
                 outgoing_order=4,
-                cost=0.0
+                shipping_delay_1=4,     # Standard pipeline
+                shipping_delay_2=4,
+                order_delay_1=4,        # Standard order pipeline  
+                order_delay_2=4,
+                decision_history=[]
             )
-            for position in Position
-        }
         
-        # Modern shipping delays (1-turn delay)
-        # This represents the time for physical goods to move/be produced
-        self.shipping_delays = {
-            Position.RETAILER: [4],     # From wholesaler
-            Position.WHOLESALER: [4],   # From distributor  
-            Position.DISTRIBUTOR: [4],  # From manufacturer
-            Position.MANUFACTURER: [4], # Production time
-        }
-        
-        # Modern information flow (instant by default)
-        # Orders are visible immediately unless information_delay > 0
-        if self.information_delay > 0:
-            self.order_delays = {
-                Position.WHOLESALER: [4] * self.information_delay,
-                Position.DISTRIBUTOR: [4] * self.information_delay,
-                Position.MANUFACTURER: [4] * self.information_delay,
-            }
-        else:
-            # Instant information flow
-            self.order_delays = {}
-        
-        # Game history
-        self.history: List[GameState] = []
-        
-    def get_current_state(self) -> GameState:
-        """Get the current game state"""
         return GameState(
-            round=self.current_round,
-            phase=self.phase,
-            players=self.players.copy(),
-            customer_demand=self._get_current_demand(),
-            total_cost=self.total_cost
+            round=0,
+            players=players,
+            customer_demand=4,  # Standard starting demand
+            total_cost=0.0
         )
     
     def step(self) -> GameState:
-        """Execute one round of the Beer Game."""
-        if self.phase != GamePhase.RUNNING and self.phase != GamePhase.SETUP:
-            raise ValueError("Cannot step a completed game")
+        """Execute one round of the game"""
+        if self.is_complete():
+            return self.current_state
             
-        if self.phase == GamePhase.SETUP:
-            self.phase = GamePhase.RUNNING
-            
-        self.current_round += 1
+        self.round += 1
         
-        # 1. Receive shipments (from delay queues)
+        # Get customer demand for this round
+        if self.round <= len(self.demand_pattern):
+            customer_demand = self.demand_pattern[self.round - 1]
+        else:
+            # Use last demand if pattern is exhausted
+            customer_demand = self.demand_pattern[-1]
+        
+        # Phase 1: Receive shipments and update inventory
         self._process_shipments()
         
-        # 2. Fill orders and calculate costs
-        self._fill_orders()
+        # Phase 2: Fill orders and update backlogs
+        self._fill_orders(customer_demand)
         
-        # 3. Get decisions from agents
-        current_state = self.get_current_state()
-        decisions = self._get_agent_decisions(current_state)
+        # Phase 3: Get agent decisions
+        decisions = self._get_agent_decisions()
         
-        # 4. Process new orders (modern: instant or delayed information)
-        self._process_new_orders(decisions)
+        # Phase 4: Update order pipeline
+        self._update_order_pipeline(decisions)
         
-        # 5. Update history
-        final_state = self.get_current_state()
-        self.history.append(final_state)
+        # Phase 5: Calculate costs
+        self._calculate_costs()
         
-        # 6. Check if game is complete
-        if self.current_round >= len(self.demand_pattern) or self.current_round >= self.max_rounds:
-            self.phase = GamePhase.COMPLETED
-            
-        return final_state
+        # Update state
+        self.current_state.round = self.round
+        self.current_state.customer_demand = customer_demand
+        
+        # Store history
+        self.state_history.append(copy.deepcopy(self.current_state))
+        
+        return self.current_state
     
-    def is_complete(self) -> bool:
-        """Check if the game has finished"""
-        return self.phase == GamePhase.COMPLETED
-    
-    def get_results(self) -> GameResults:
-        """Get final game results (only available after completion)"""
-        if not self.is_complete():
-            raise ValueError("Game not yet complete")
-            
-        # Calculate individual costs
-        individual_costs = {
-            position: sum(state.players[position].cost for state in self.history)
-            for position in Position
-        }
-        
-        # Calculate bullwhip ratio
-        bullwhip_ratio = self._calculate_bullwhip_ratio()
-        
-        # Calculate service level
-        service_level = self._calculate_service_level()
-        
-        # Get final inventories
-        final_inventories = {
-            position: self.players[position].inventory
-            for position in Position
-        }
-        
-        return GameResults(
-            total_cost=self.total_cost,
-            individual_costs=individual_costs,
-            bullwhip_ratio=bullwhip_ratio,
-            service_level=service_level,
-            rounds_played=len(self.history),
-            demand_pattern=self.demand_pattern[:len(self.history)],
-            final_inventories=final_inventories
-        )
-    
-    def _get_current_demand(self) -> int:
-        """Get customer demand for current round"""
-        if self.current_round <= 0 or self.current_round > len(self.demand_pattern):
-            return 0
-        return self.demand_pattern[self.current_round - 1]
-    
-    def _process_shipments(self) -> None:
-        """Process incoming shipments from delay queues"""
+    def _process_shipments(self):
+        """Process incoming shipments (advance shipping pipeline)"""
         for position in Position:
-            if position in self.shipping_delays and self.shipping_delays[position]:
-                # Receive shipment from 1-turn ago (or longer if configured)
-                shipment = self.shipping_delays[position].pop(0)
-                self.players[position].inventory += shipment
+            player = self.current_state.players[position]
+            
+            # Receive shipment from shipping_delay_1
+            player.inventory += player.shipping_delay_1
+            
+            # Advance pipeline
+            player.shipping_delay_1 = player.shipping_delay_2
+            player.shipping_delay_2 = 0  # Will be filled by upstream orders
     
-    def _fill_orders(self) -> None:
-        """Fill orders and calculate costs for current round"""
-        # Start with customer demand to retailer
-        current_demand = self._get_current_demand()
+    def _fill_orders(self, customer_demand: int):
+        """Fill orders from downstream and update backlogs"""
+        # Start with customer demand at retailer
+        demand = customer_demand
         
-        for position in Position:
-            player = self.players[position]
+        for position in Position.get_supply_chain_order():
+            player = self.current_state.players[position]
             
-            # Determine demand on this player
-            if position == Position.RETAILER:
-                demand = current_demand
-            else:
-                demand = player.incoming_order
+            # Update incoming order (this round's demand)
+            player.incoming_order = demand
             
-            # Fill orders from available inventory
-            fulfilled = min(demand + player.backlog, player.inventory)
+            # Total demand = incoming order + existing backlog
+            total_demand = player.incoming_order + player.backlog
+            
+            # Fill what we can from inventory
+            fulfilled = min(total_demand, player.inventory)
             player.inventory -= fulfilled
             
             # Update backlog
-            total_demand = demand + player.backlog
-            player.backlog = max(0, total_demand - fulfilled)
+            player.backlog = total_demand - fulfilled
             
-            # Calculate costs
-            holding_cost = player.inventory * self.holding_cost
-            backorder_cost = player.backlog * self.backorder_cost
-            player.cost = holding_cost + backorder_cost
-            self.total_cost += player.cost
+            # Demand for next upstream position = what we fulfilled
+            # (In classic mode, use delayed information)
+            if self.classic_mode and position != Position.RETAILER:
+                # Use order from 2 periods ago
+                demand = player.order_delay_2
+            else:
+                # Modern mode: use current fulfilled amount as next demand
+                demand = fulfilled
     
-    def _get_agent_decisions(self, state: GameState) -> Dict[Position, int]:
-        """Get order decisions from all agents"""
+    def _get_agent_decisions(self) -> Dict[Position, int]:
+        """Get ordering decisions from all agents"""
         decisions = {}
         
-        for position, agent in self.agents.items():
-            observable_state = state.get_observable_state(position)
-            decision = agent.make_decision(observable_state)
-            decisions[position] = decision
+        for position in Position:
+            agent = self.agents[position]
+            agent_state = self.current_state.to_agent_view(
+                position, self.visibility_level, self.state_history
+            )
             
-            # Store decision in player history
-            self.players[position].decisions.append(decision)
-            self.players[position].outgoing_order = decision
-            
+            try:
+                decision = agent.make_decision(agent_state)
+                # Validate decision
+                if not isinstance(decision, int) or decision < 0:
+                    raise ValueError(f"Invalid decision: {decision}")
+                decisions[position] = decision
+            except Exception as e:
+                print(f"Warning: Agent {agent.get_name()} failed to make decision: {e}")
+                # Fallback decision
+                decisions[position] = agent_state["incoming_order"]
+        
         return decisions
     
-    def _process_new_orders(self, decisions: Dict[Position, int]) -> None:
-        """Process new orders - modern instant information flow"""
-        
-        if self.information_delay == 0:
-            # MODERN: Instant information flow
-            # Orders are visible immediately to upstream players
-            if Position.RETAILER in decisions:
-                self.players[Position.WHOLESALER].incoming_order = decisions[Position.RETAILER]
-                
-            if Position.WHOLESALER in decisions:
-                self.players[Position.DISTRIBUTOR].incoming_order = decisions[Position.WHOLESALER]
-                
-            if Position.DISTRIBUTOR in decisions:
-                self.players[Position.MANUFACTURER].incoming_order = decisions[Position.DISTRIBUTOR]
-        else:
-            # CLASSIC: Information delays (for comparison studies)
-            # Update order delays (information flow)
-            if Position.RETAILER in decisions:
-                self.order_delays[Position.WHOLESALER].append(decisions[Position.RETAILER])
-                
-            if Position.WHOLESALER in decisions:
-                self.order_delays[Position.DISTRIBUTOR].append(decisions[Position.WHOLESALER])
-                
-            if Position.DISTRIBUTOR in decisions:
-                self.order_delays[Position.MANUFACTURER].append(decisions[Position.DISTRIBUTOR])
-            
-            # Process orders that arrive this round (with delay)
-            for downstream, upstream in [
-                (Position.RETAILER, Position.WHOLESALER),
-                (Position.WHOLESALER, Position.DISTRIBUTOR), 
-                (Position.DISTRIBUTOR, Position.MANUFACTURER)
-            ]:
-                if upstream in self.order_delays and self.order_delays[upstream]:
-                    arriving_order = self.order_delays[upstream].pop(0)
-                    self.players[upstream].incoming_order = arriving_order
-        
-        # Update shipping delays (production/shipping) - always has physical delay
+    def _update_order_pipeline(self, decisions: Dict[Position, int]):
+        """Update order pipeline with new decisions"""
         for position in Position:
-            if position in decisions:
-                self.shipping_delays[position].append(decisions[position])
+            player = self.current_state.players[position]
+            decision = decisions[position]
+            
+            # Update decision history
+            player.decision_history.append(decision)
+            player.outgoing_order = decision
+            
+            # Advance order pipeline
+            player.order_delay_2 = player.order_delay_1
+            player.order_delay_1 = decision
+            
+            # Update upstream shipping pipeline
+            upstream_pos = position.get_upstream_position()
+            if upstream_pos:
+                upstream_player = self.current_state.players[upstream_pos]
+                upstream_player.shipping_delay_2 = decision
+            # Manufacturer has infinite supply
+            elif position == Position.MANUFACTURER:
+                player.shipping_delay_2 = decision
+    
+    def _calculate_costs(self):
+        """Calculate costs for this round"""
+        total_round_cost = 0.0
+        
+        for position in Position:
+            player = self.current_state.players[position]
+            
+            # Calculate individual costs
+            holding_cost = max(0, player.inventory) * self.holding_cost
+            backorder_cost = player.backlog * self.backorder_cost
+            
+            player.period_cost = holding_cost + backorder_cost
+            player.total_cost += player.period_cost
+            player.cost = player.total_cost  # Compatibility alias
+            total_round_cost += player.period_cost
+        
+        self.current_state.total_cost += total_round_cost
+    
+    def is_complete(self) -> bool:
+        """Check if game is complete"""
+        return self.round >= len(self.demand_pattern)
+    
+    def get_results(self) -> GameResults:
+        """Get final game results and metrics"""
+        if not self.is_complete():
+            raise ValueError("Game is not complete yet")
+        
+        # Calculate individual costs
+        individual_costs = {}
+        total_cost = 0.0
+        
+        for position in Position:
+            cost = self.current_state.players[position].total_cost
+            individual_costs[position] = cost
+            total_cost += cost
+        
+        # Calculate service level (orders fulfilled / total orders)
+        total_orders = 0
+        total_fulfilled = 0
+        
+        for state in self.state_history:
+            for position in Position:
+                player = state.players[position]
+                total_orders += player.incoming_order
+                total_fulfilled += max(0, player.incoming_order - player.backlog)
+        
+        service_level = total_fulfilled / max(1, total_orders)
+        
+        # Calculate bullwhip ratio (variance amplification)
+        bullwhip_ratio = self._calculate_bullwhip_ratio()
+        
+        return GameResults(
+            total_cost=total_cost,
+            individual_costs=individual_costs,
+            service_level=service_level,
+            bullwhip_ratio=bullwhip_ratio,
+            total_rounds=len(self.state_history)
+        )
     
     def _calculate_bullwhip_ratio(self) -> float:
-        """Calculate bullwhip effect (variance amplification up the supply chain)"""
-        if len(self.history) < 4:
+        """Calculate bullwhip effect (order variance amplification)"""
+        if len(self.state_history) < 3:
             return 1.0
-            
-        # Get order variance at each level
-        retailer_orders = [state.players[Position.RETAILER].outgoing_order for state in self.history]
-        manufacturer_orders = [state.players[Position.MANUFACTURER].outgoing_order for state in self.history]
         
-        retailer_var = np.var(retailer_orders) if len(retailer_orders) > 1 else 1.0
-        manufacturer_var = np.var(manufacturer_orders) if len(manufacturer_orders) > 1 else 1.0
+        # Get order sequences for each position
+        orders_by_position = {pos: [] for pos in Position}
         
-        # Avoid division by zero
-        if retailer_var == 0:
-            return 1.0 if manufacturer_var == 0 else float('inf')
-            
+        for state in self.state_history:
+            for position in Position:
+                orders_by_position[position].append(
+                    state.players[position].incoming_order
+                )
+        
+        # Calculate variance for each position
+        variances = {}
+        for position, orders in orders_by_position.items():
+            if len(orders) > 1:
+                mean = sum(orders) / len(orders)
+                variance = sum((x - mean) ** 2 for x in orders) / len(orders)
+                variances[position] = max(variance, 0.001)  # Avoid division by zero
+            else:
+                variances[position] = 0.001
+        
+        # Bullwhip ratio = upstream variance / downstream variance
+        retailer_var = variances[Position.RETAILER]
+        manufacturer_var = variances[Position.MANUFACTURER]
+        
         return manufacturer_var / retailer_var
     
-    def _calculate_service_level(self) -> float:
-        """Calculate overall service level (orders fulfilled / orders received)"""
-        if not self.history:
-            return 0.0
-            
-        total_demand = sum(self._get_demand_for_round(i) for i in range(1, len(self.history) + 1))
-        total_backlog = sum(state.players[Position.RETAILER].backlog for state in self.history)
-        
-        if total_demand == 0:
-            return 1.0
-            
-        fulfilled = total_demand - total_backlog
-        return max(0.0, fulfilled / total_demand)
-    
-    def _get_demand_for_round(self, round_num: int) -> int:
-        """Get demand for a specific round"""
-        if round_num <= 0 or round_num > len(self.demand_pattern):
-            return 0
-        return self.demand_pattern[round_num - 1]
+    def get_state_history(self) -> List[GameState]:
+        """Get complete game state history"""
+        return self.state_history.copy()
 
 
 def create_classic_beer_game(
-    agents: Dict[Position, Agent],
-    demand_pattern: List[int],
-    **kwargs
+    agents: Dict[Position, Agent], 
+    demand_pattern: List[int]
 ) -> BeerGame:
     """
-    Create Beer Game with classic 1960s settings for comparison studies.
+    Create Beer Game with classic 1960s settings.
     
-    - 2-turn information delays
-    - 2-turn shipping delays
+    - 2-period information delays
+    - 2-period shipping delays  
+    - $1 holding : $2 backorder costs
     """
     return BeerGame(
-        agents, 
-        demand_pattern, 
-        information_delay=2, 
-        shipping_delay=2,
-        **kwargs
+        agents=agents,
+        demand_pattern=demand_pattern,
+        classic_mode=True,
+        holding_cost=HOLDING_COST_PER_UNIT,
+        backorder_cost=BACKORDER_COST_PER_UNIT
+    )
+
+
+def create_modern_beer_game(
+    agents: Dict[Position, Agent], 
+    demand_pattern: List[int]
+) -> BeerGame:
+    """
+    Create Beer Game with modern settings.
+    
+    - Instant information flow
+    - 1-period shipping delays
+    - $1 holding : $2 backorder costs
+    """
+    return BeerGame(
+        agents=agents,
+        demand_pattern=demand_pattern,
+        classic_mode=False,
+        holding_cost=HOLDING_COST_PER_UNIT,
+        backorder_cost=BACKORDER_COST_PER_UNIT
     )

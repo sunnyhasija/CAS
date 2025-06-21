@@ -1,23 +1,23 @@
 """
-Ollama client integration for Beer Game agents.
+Ollama client integration for Beer Game agents with cost-focused prompts.
 
 This module provides an agent that uses Ollama-hosted LLMs to make
-supply chain decisions in the Beer Game.
+supply chain decisions with realistic cost constraints and no game references.
 """
 
 import json
 import requests
 import time
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from ..beer_game.agents import Agent, Position
 
 
 class OllamaAgent(Agent):
     """
-    LLM agent using Ollama API for Beer Game decisions.
+    LLM agent using Ollama API for supply chain decisions.
     
-    This agent sends the current game state to an Ollama-hosted LLM
-    and parses the response to extract an order decision.
+    Uses cost-focused prompts that avoid game references and emphasize
+    the fundamental trade-off between inventory and stockout costs.
     """
     
     def __init__(
@@ -60,90 +60,121 @@ class OllamaAgent(Agent):
         
         # Set up system prompt
         if self.neutral_prompt:
-            self.system_prompt = self._create_neutral_system_prompt()
+            self.system_prompt = self._create_neutral_cost_focused_prompt()
         else:
-            self.system_prompt = self._create_default_system_prompt()
+            self.system_prompt = self._create_cost_focused_system_prompt()
         
         # Request session for connection pooling
         self.session = requests.Session()
         
-    def _create_default_system_prompt(self) -> str:
-        """Create position-specific system prompt based on business realities"""
+        # Initialize interaction tracking
+        self._last_interaction = {}
+        
+    def _create_cost_focused_system_prompt(self) -> str:
+        """Create position-specific system prompt focused on cost minimization"""
         
         position_prompts = {
-            Position.RETAILER: """You are the RETAILER in a beer supply chain. Your primary objective is to fulfill ALL customer demand to maximize sales revenue and customer satisfaction.
+            Position.RETAILER: """You are the RETAILER in a consumer goods supply chain. Your role is to serve end customers while minimizing total operational costs.
+
+BUSINESS OBJECTIVE: Minimize total costs while maintaining reasonable customer service.
+
+COST STRUCTURE:
+- Inventory holding cost: $1 per unit per period (warehouse, insurance, obsolescence)
+- Stockout penalty: $2 per unit of unmet customer demand (lost sales, expediting)
+- Working capital constraint: Excess inventory ties up cash and reduces profitability
 
 BUSINESS PRIORITIES:
-1. NEVER lose a sale - stockouts directly hurt your revenue and customer relationships
-2. Minimize holding costs, but service level is more important than inventory costs  
-3. You see actual customer demand - use this critical information advantage
-4. React quickly to demand changes - customers won't wait
+1. Optimize inventory levels - avoid both stockouts AND excess inventory
+2. Respond intelligently to demand changes without overreacting
+3. Maintain customer service while controlling costs
+4. Use demand visibility advantage to make informed decisions
 
 DECISION FRAMEWORK:
-- Analyze customer demand patterns carefully
-- Order enough to avoid stockouts, even if it means higher inventory
-- Consider demand seasonality and trends
-- Balance: High service level > Low inventory costs
+- Analyze recent customer demand patterns and trends
+- Right-size inventory to balance service vs. cost
+- Ask: Is this demand change temporary or permanent?
+- Consider: What's the cost of being wrong in either direction?
 
-Your success = Customer satisfaction + Sales maximization""",
+Your success = Low total costs + Adequate customer service""",
 
-            Position.WHOLESALER: """You are the WHOLESALER in a beer supply chain. Your role is to efficiently serve retailers while optimizing your distribution operations.
+            Position.WHOLESALER: """You are the WHOLESALER in a consumer goods supply chain. Your role is to efficiently serve retailers while minimizing distribution costs.
+
+BUSINESS OBJECTIVE: Minimize total costs while providing reliable service to retail partners.
+
+COST STRUCTURE:
+- Inventory holding cost: $1 per unit per period (warehousing, handling, capital)
+- Stockout penalty: $2 per unit of unmet retailer orders (lost sales, relationships)
+- Working capital constraint: Inventory investment must generate returns
 
 BUSINESS PRIORITIES:
-1. Maintain high fill rates to retailers - they depend on you for their success
-2. Optimize warehouse utilization and inventory turns
-3. Smooth out retailer demand volatility through intelligent buffering  
-4. Build reliable supply relationships upstream and downstream
+1. Optimize inventory investment for maximum efficiency
+2. Provide reliable service to retailers without costly overstocking
+3. Smooth retailer demand volatility through intelligent buffering
+4. Balance service reliability with cost control
 
 DECISION FRAMEWORK:
-- Anticipate retailer needs based on their ordering patterns
-- Maintain safety stock for reliable service but avoid excessive inventory
-- Look for trends in retailer orders - are they seasonal or one-time spikes?
-- Balance: Reliable service to retailers + Operational efficiency
+- Anticipate retailer needs based on ordering patterns
+- Maintain cost-effective safety stock levels
+- Distinguish between temporary spikes and sustained demand changes
+- Consider: What's the minimum inventory needed for reliable service?
 
-Your success = Retailer satisfaction + Operational efficiency""",
+Your success = Low total costs + Reliable retailer service""",
 
-            Position.DISTRIBUTOR: """You are the DISTRIBUTOR in a beer supply chain. Your role is to coordinate regional supply networks and optimize logistics across your territory.
+            Position.DISTRIBUTOR: """You are the DISTRIBUTOR in a consumer goods supply chain. Your role is to coordinate regional supply networks while minimizing logistics costs.
+
+BUSINESS OBJECTIVE: Minimize total costs while ensuring supply network reliability.
+
+COST STRUCTURE:
+- Inventory holding cost: $1 per unit per period (storage, handling, opportunity cost)
+- Stockout penalty: $2 per unit of unmet orders (disruption, expediting)
+- Working capital constraint: Inventory ties up significant capital
 
 BUSINESS PRIORITIES:
-1. Ensure consistent supply availability across your distribution network
-2. Minimize transportation and storage costs through efficient planning
-3. Coordinate between multiple wholesalers and manufacturing capacity
-4. Plan for regional demand variations and logistics constraints
+1. Optimize inventory investment across the distribution network
+2. Coordinate between wholesalers and manufacturing efficiently
+3. Minimize logistics costs through intelligent planning
+4. Balance network reliability with cost control
 
 DECISION FRAMEWORK:
 - Think strategically about supply chain flow and bottlenecks
-- Consider transportation lead times and batch economics
-- Smooth demand signals between wholesalers and manufacturer
-- Plan for capacity constraints and delivery schedules
+- Consider transportation costs and batch economics
+- Smooth demand signals while avoiding costly overreaction
+- Plan for delivery constraints and lead time variability
 
-Your success = Network reliability + Logistics efficiency""",
+Your success = Low total costs + Network reliability""",
 
-            Position.MANUFACTURER: """You are the MANUFACTURER in a beer supply chain. Your role is to plan production efficiently while meeting downstream demand through optimal capacity management.
+            Position.MANUFACTURER: """You are the MANUFACTURER in a consumer goods supply chain. Your role is to plan production efficiently while minimizing total manufacturing costs.
+
+BUSINESS OBJECTIVE: Minimize total costs while meeting downstream demand through optimal production planning.
+
+COST STRUCTURE:
+- Inventory holding cost: $1 per unit per period (storage, obsolescence, capital)
+- Stockout penalty: $2 per unit of unmet distributor orders (lost sales, disruption)
+- Production volatility increases manufacturing costs and inefficiency
 
 BUSINESS PRIORITIES:
-1. Optimize production efficiency and capacity utilization
-2. Plan production runs for economies of scale and cost minimization
-3. Ensure adequate supply to meet distributor demands
-4. Balance production smoothing with demand responsiveness
+1. Optimize production schedules for cost efficiency
+2. Balance production smoothing with demand responsiveness
+3. Minimize inventory while ensuring adequate supply
+4. Plan production runs for economies of scale
 
 DECISION FRAMEWORK:
-- Think in terms of production batches and capacity constraints
-- Consider brewing lead times and production scheduling
-- Avoid production volatility - smooth operations reduce costs
-- Plan for demand patterns but don't overreact to short-term spikes
+- Plan production considering lead times and capacity constraints
+- Smooth production to reduce manufacturing costs
+- Avoid both costly stockouts AND expensive overproduction
+- Consider: Is demand volatility real or just noise in the system?
 
-Your success = Production efficiency + Demand fulfillment"""
+Your success = Low total costs + Efficient production + Adequate supply"""
         }
 
         base_prompt = f"""
 {position_prompts[self.position]}
 
-GAME RULES:
-- Each round, decide how many units to order from your upstream supplier
-- Costs: $1 per unit held in inventory, $2 per unit of backlog (unfulfilled orders)
-- There are shipping delays in the system
-- Goal: Optimize YOUR position's performance while supporting overall supply chain success
+SYSTEM DYNAMICS:
+- Each period, decide how many units to order from your upstream supplier
+- Information delays exist in the system - you see orders with delay
+- Shipping takes time - orders don't arrive immediately
+- Goal: Minimize YOUR total costs while maintaining supply chain performance
 
 RESPONSE FORMAT:
 You must respond with a JSON object containing only your order decision:
@@ -152,24 +183,28 @@ You must respond with a JSON object containing only your order decision:
 The order must be a non-negative integer. Provide no other text outside the JSON."""
 
         return base_prompt
-    
-    def _create_neutral_system_prompt(self) -> str:
-        """Create neutral system prompt without position-specific biasing"""
-        return f"""You are the {self.position.value.upper()} in a supply chain coordination simulation.
 
-OBJECTIVE: Minimize your costs while maintaining good supply chain performance.
+    def _create_neutral_cost_focused_prompt(self) -> str:
+        """Create neutral system prompt focused on cost optimization"""
+        return f"""You are the {self.position.value.upper()} in a consumer goods supply chain coordination system.
 
-GAME RULES:
-- Each round, decide how many units to order from your upstream supplier
-- Costs: $1 per unit held in inventory, $2 per unit of backlog (unfulfilled orders)  
-- There are shipping delays in the system
-- Goal: Balance inventory costs with service level
+OBJECTIVE: Minimize your total costs while maintaining adequate supply chain performance.
+
+COST STRUCTURE:
+- Inventory holding cost: $1 per unit per period
+- Stockout/backlog penalty: $2 per unit of unmet orders  
+- Goal: Find the optimal balance between these competing costs
+
+SYSTEM DYNAMICS:
+- Information and shipping delays exist in the supply chain
+- Your decisions affect both your costs and overall system performance
+- Excessive inventory wastes capital; insufficient inventory creates shortages
 
 DECISION PROCESS:
-1. Analyze your current inventory and backlog levels
-2. Consider incoming orders from your downstream partner
-3. Estimate appropriate order quantity for next round
-4. Balance avoiding stockouts with minimizing excess inventory
+1. Analyze your current inventory and backlog situation
+2. Consider incoming orders from your downstream customer
+3. Estimate appropriate order quantity balancing costs and service
+4. Avoid both expensive stockouts and costly excess inventory
 
 RESPONSE FORMAT:
 You must respond with a JSON object containing only your order decision:
@@ -187,18 +222,48 @@ The order must be a non-negative integer. Provide no other text outside the JSON
         Returns:
             Order quantity (non-negative integer)
         """
+        decision, interaction_data = self._make_decision_with_tracking(game_state)
+        # Store interaction data for potential retrieval
+        self._last_interaction = interaction_data
+        return decision
+    
+    def _make_decision_with_tracking(self, game_state: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+        """
+        Make ordering decision and return decision + interaction data.
+        
+        Args:
+            game_state: Current observable game state
+            
+        Returns:
+            Tuple of (order_quantity, interaction_data)
+        """
+        start_time = time.time()
+        
         # Create prompt from game state
         user_prompt = self._create_user_prompt(game_state)
+        
+        interaction_data = {
+            'prompt': user_prompt,
+            'response': '',
+            'decision': 0,
+            'response_time_ms': 0.0,
+            'success': False
+        }
         
         # Get LLM response with retries
         for attempt in range(self.max_retries):
             try:
                 response = self._call_ollama(user_prompt)
+                interaction_data['response'] = response
+                
                 order = self._parse_response(response)
                 
                 # Validate order
                 if isinstance(order, int) and order >= 0:
-                    return order
+                    interaction_data['decision'] = order
+                    interaction_data['success'] = True
+                    interaction_data['response_time_ms'] = (time.time() - start_time) * 1000
+                    return order, interaction_data
                 else:
                     raise ValueError(f"Invalid order value: {order}")
                     
@@ -207,22 +272,34 @@ The order must be a non-negative integer. Provide no other text outside the JSON
                 if attempt == self.max_retries - 1:
                     # Fallback to simple heuristic
                     print(f"Using fallback decision for {self.name}")
-                    return self._fallback_decision(game_state)
+                    fallback_order = self._fallback_decision(game_state)
+                    interaction_data['decision'] = fallback_order
+                    interaction_data['response'] = f"FALLBACK: {e}"
+                    interaction_data['response_time_ms'] = (time.time() - start_time) * 1000
+                    return fallback_order, interaction_data
                 time.sleep(1)  # Brief delay before retry
         
         # Should not reach here, but safety fallback
-        return self._fallback_decision(game_state)
+        fallback_order = self._fallback_decision(game_state)
+        interaction_data['decision'] = fallback_order
+        interaction_data['response'] = "FALLBACK: Maximum retries exceeded"
+        interaction_data['response_time_ms'] = (time.time() - start_time) * 1000
+        return fallback_order, interaction_data
+    
+    def get_last_interaction(self) -> Dict[str, Any]:
+        """Get interaction data from last decision"""
+        return getattr(self, '_last_interaction', {})
     
     def _create_user_prompt(self, game_state: Dict[str, Any]) -> str:
         """Create user prompt from game state with configurable memory"""
         prompt_parts = [
-            f"ROUND {game_state['round']}",
+            f"PERIOD {game_state['round']}",
             f"Position: {game_state['position'].upper()}",
             f"Current inventory: {game_state['inventory']} units",
             f"Current backlog: {game_state['backlog']} units", 
             f"Incoming order: {game_state['incoming_order']} units",
             f"Last order placed: {game_state['last_outgoing_order']} units",
-            f"Round cost: ${game_state['round_cost']:.2f}",
+            f"Period cost: ${game_state['round_cost']:.2f}",
         ]
         
         # Add customer demand for retailer
@@ -247,13 +324,32 @@ The order must be a non-negative integer. Provide no other text outside the JSON
         
         # Add memory context to decision prompt
         if self.memory_window == 0:
-            prompt_parts.append("\nMake your order decision based on current round information only.")
+            prompt_parts.append("\nMake your order decision based on current period information only.")
         elif self.memory_window is None:
             prompt_parts.append("\nConsider your complete order history when making this decision.")
         else:
             prompt_parts.append(f"\nConsider your recent {self.memory_window} order(s) when making this decision.")
         
-        prompt_parts.append("How many units should you order this round?")
+        # Add visibility information to prompt if available
+        if "visible_supply_chain" in game_state:
+            prompt_parts.append("\nSUPPLY CHAIN VISIBILITY:")
+            for pos, info in game_state["visible_supply_chain"].items():
+                prompt_parts.append(f"{pos.title()}: Inventory={info['inventory']}, Backlog={info['backlog']}, Cost=${info['cost']:.2f}")
+        
+        if "visible_history" in game_state:
+            prompt_parts.append("\nPARTNER HISTORY:")
+            for pos, history in game_state["visible_history"].items():
+                recent_history = history[-3:] if len(history) > 3 else history  # Show last 3 rounds
+                prompt_parts.append(f"{pos.title()} recent: {[f'R{h['round']}:Inv{h['inventory']},Order{h['outgoing_order']}' for h in recent_history]}")
+        
+        if "system_metrics" in game_state:
+            metrics = game_state["system_metrics"]
+            prompt_parts.append(f"\nSYSTEM METRICS:")
+            prompt_parts.append(f"Total system cost: ${metrics['total_system_cost']:.2f}")
+            prompt_parts.append(f"Total system inventory: {metrics['total_system_inventory']} units")
+            prompt_parts.append(f"Total system backlog: {metrics['total_system_backlog']} units")
+        
+        prompt_parts.append("How many units should you order this period to minimize your total costs?")
         
         return "\n".join(prompt_parts)
     

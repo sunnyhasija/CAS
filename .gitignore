@@ -1,0 +1,245 @@
+# SCM-Arena .gitignore
+# Keep only essential project files, exclude experimental data and analysis
+
+# Experimental Data & Results
+*.db
+*.sqlite
+*.sqlite3
+scm_arena_experiments.db
+llama32_*.db
+audit_test.db
+*_study.csv
+*_results.csv
+*_analysis.csv
+test_*.csv
+experiment_*.csv
+comprehensive_*.csv
+*_comparison.csv
+
+# Analysis Files & Notebooks
+analysis/
+results/
+experiments/
+data_exports/
+experiment_exports/
+comprehensive_test/
+baseline_results/
+*.ipynb
+*.xlsx
+*.xls
+
+# Log Files
+*.log
+experiment_log.txt
+nohup.out
+*.out
+
+# Sample Runs & Test Data
+sample_runs/
+test_runs/
+quick_tests/
+validation/
+
+# Temporary Files
+temp/
+tmp/
+*.tmp
+*.temp
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.conda/
+
+# Poetry
+poetry.lock
+
+# IDE & Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PyCharm
+.idea/
+
+# Spyder
+.spyderproject
+.spyproject
+
+# Rope
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask
+instance/
+.webassets-cache
+
+# Scrapy
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmyp
+
+# System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Archive Files
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Backup Files
+*.bak
+*.backup
+*~
+
+# Model Files (if large)
+models/
+*.model
+*.bin
+*.safetensors
+
+# Generated Reports
+reports/
+output/
+generated/
+
+# Plots & Visualizations (generated)
+plots/
+figures/
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.svg
+
+# Configuration with secrets
+config.json
+secrets.json
+.secrets
+api_keys.txt
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Large data files
+*.csv
+!examples/*.csv
+!tests/fixtures/*.csv
