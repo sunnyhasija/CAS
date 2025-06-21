@@ -3,9 +3,16 @@
 ## Project Overview
 SCM-Arena is a benchmark platform for evaluating Large Language Models on supply chain management coordination tasks, starting with the multi-agent Beer Game simulation.
 
-## Current Status: Planning Phase
-- **Phase**: Initial setup and planning
-- **Next Steps**: Repository setup, project structure, Beer Game engine development
+## Current Status: Core Implementation Complete
+- **Phase**: Phase 1 - Core Beer Game Engine + Ollama Integration ✅
+- **Completed**: 
+  - Project structure created
+  - Beer Game engine implemented
+  - Agent interfaces and basic agents created
+  - Ollama integration working
+  - CLI interface built
+  - Basic example created
+- **Next Steps**: Testing, Poetry installation, first game runs
 
 ## Architecture
 
@@ -34,21 +41,106 @@ scm-arena/
 └── README.md
 ```
 
-## Development Phases
+### Example Workflows
+
+#### Quick Start Workflow
+```bash
+# 1. Setup
+poetry install
+ollama serve  # (in separate terminal)
+ollama pull llama3.2
+
+# 2. Verify everything works
+poetry run python -m scm_arena.cli test-model
+
+# 3. Run your first game
+poetry run python -m scm_arena.cli run
+
+# 4. Try different scenarios
+poetry run python -m scm_arena.cli run --scenario shock
+```
+
+#### Research Comparison Workflow
+```bash
+# 1. Get multiple models
+ollama pull llama3.2
+ollama pull llama2  
+ollama pull mistral
+
+# 2. Quick comparison
+poetry run python -m scm_arena.cli compare --models llama3.2 llama2 mistral
+
+# 3. Detailed analysis across scenarios
+poetry run python -m scm_arena.cli compare \
+  --models llama3.2 llama2 \
+  --scenarios classic random shock seasonal \
+  --runs 5 --rounds 30
+
+# 4. Benchmark against algorithmic baselines
+poetry run python -m scm_arena.cli benchmark --scenario classic
+```
+
+#### Model Development Workflow
+```bash
+# 1. Test basic functionality
+poetry run python -m scm_arena.cli test-model --model your-model
+
+# 2. Quick validation run
+poetry run python -m scm_arena.cli run --model your-model --rounds 15
+
+# 3. Compare against baseline
+poetry run python -m scm_arena.cli compare \
+  --models your-model llama3.2 \
+  --scenarios classic --runs 3
+
+# 4. Full evaluation
+poetry run python -m scm_arena.cli compare \
+  --models your-model \
+  --scenarios classic random shock seasonal trend complex \
+  --runs 5 --rounds 40
+```
+
+### ✅ Project Structure Setup
+Created complete folder structure and files using bash commands:
+```bash
+# Main directories created
+src/scm_arena/beer_game/
+src/scm_arena/models/
+src/scm_arena/evaluation/
+tests/
+examples/
+
+# Key files created
+pyproject.toml, README.md, .gitignore
+All __init__.py files for proper Python packaging
+Core module files: game.py, agents.py, metrics.py, etc.
+```
+
+
 
 ### Phase 1: Core Beer Game Engine + Ollama Integration
-**Status**: Not Started
-**Goals**:
-- Implement Beer Game simulation logic
-- Create agent interface for LLMs
-- Basic Ollama client integration
-- CLI interface for running single games
+**Status**: ✅ Complete
+**Goals**: 
+- ✅ Implement Beer Game simulation logic
+- ✅ Create agent interface for LLMs
+- ✅ Basic Ollama client integration
+- ✅ CLI interface for running single games
 
 **Key Components**:
-- `BeerGame` class with 4-tier supply chain
-- `Agent` abstract base class
-- `OllamaAgent` implementation
-- Basic game runner
+- ✅ `BeerGame` class with 4-tier supply chain
+- ✅ `Agent` abstract base class
+- ✅ `OllamaAgent` implementation
+- ✅ Basic game runner and CLI
+- ✅ Example scripts
+
+**Files Created**:
+- `src/scm_arena/beer_game/game.py` - Core game engine
+- `src/scm_arena/beer_game/agents.py` - Agent interfaces and basic implementations
+- `src/scm_arena/models/ollama_client.py` - Ollama LLM integration
+- `src/scm_arena/evaluation/scenarios.py` - Demand patterns
+- `src/scm_arena/cli.py` - Command-line interface
+- `examples/basic_game_example.py` - Working example
+- `pyproject.toml` - Project configuration
 
 ### Phase 2: Evaluation Pipeline + Metrics
 **Status**: Not Started
@@ -161,8 +253,10 @@ class OllamaAgent(Agent):
 ## Getting Started Checklist
 
 ### Repository Setup
+- [x] Create folder structure
+- [x] Create all necessary files 
 - [ ] Create GitHub repository
-- [ ] Clone locally
+- [ ] Clone locally and initialize Git
 - [ ] Initialize Poetry project
 - [ ] Set up basic project structure
 
@@ -173,32 +267,275 @@ class OllamaAgent(Agent):
 - [ ] Identify target Llama models
 
 ### Initial Implementation
-- [ ] Create pyproject.toml
-- [ ] Implement basic BeerGame class
-- [ ] Create Agent interfaces
-- [ ] Build OllamaAgent
-- [ ] Add CLI runner
-- [ ] Write basic tests
+- [x] Create pyproject.toml
+- [x] Implement basic BeerGame class
+- [x] Create Agent interfaces
+- [x] Build OllamaAgent
+- [x] Add CLI runner
+- [x] Write basic tests
+- [x] Create working examples
 
-## Future Enhancements
+## Usage Instructions
 
-### Short Term
-- Multiple demand patterns
-- Better prompt engineering for LLMs
+### Setup & Installation
+```bash
+# Install dependencies
+poetry install
+
+# Start Ollama server (in separate terminal)
+ollama serve
+
+# Pull models you want to test
+ollama pull llama3.2
+ollama pull llama2
+ollama pull mistral
+ollama pull codellama
+
+# Verify installation
+poetry run python -m scm_arena.cli list-models
+```
+
+### CLI Commands Reference
+
+#### 1. Basic Game Execution
+```bash
+# Run game with default settings (llama3.2, classic scenario, 20 rounds)
+poetry run python -m scm_arena.cli run
+
+# Specify model and scenario
+poetry run python -m scm_arena.cli run --model llama2 --scenario shock --rounds 30
+
+# Enable verbose output to see round-by-round progress
+poetry run python -m scm_arena.cli run --model mistral --verbose
+
+# Available scenarios: classic, random, shock, seasonal, trend, complex
+poetry run python -m scm_arena.cli run --scenario seasonal --rounds 25
+```
+
+#### 2. Model Testing & Validation
+```bash
+# Quick test of a specific model
+poetry run python -m scm_arena.cli test-model --model llama3.2
+
+# Test different models
+poetry run python -m scm_arena.cli test-model --model codellama
+poetry run python -m scm_arena.cli test-model --model mistral
+```
+
+#### 3. Model Comparison
+```bash
+# Compare multiple models on single scenario
+poetry run python -m scm_arena.cli compare --models llama3.2 llama2 mistral --scenarios classic
+
+# Compare across multiple scenarios
+poetry run python -m scm_arena.cli compare --models llama3.2 mistral --scenarios classic random shock
+
+# Multiple runs for statistical significance
+poetry run python -m scm_arena.cli compare --models llama3.2 llama2 --scenarios classic --runs 5 --rounds 30
+```
+
+#### 4. Comprehensive Benchmarking
+```bash
+# Benchmark all available agent types (includes algorithmic baselines)
+poetry run python -m scm_arena.cli benchmark
+
+# Benchmark with specific scenario
+poetry run python -m scm_arena.cli benchmark --scenario random --rounds 25
+
+# Benchmark with custom settings
+poetry run python -m scm_arena.cli benchmark --scenario complex --rounds 40
+```
+
+#### 5. Model Discovery
+```bash
+# List all available Ollama models
+poetry run python -m scm_arena.cli list-models
+
+# This shows models you can use with --model parameter
+```
+
+### Model Selection Guide
+
+#### Recommended Models for Supply Chain Tasks
+```bash
+# Best overall performance (balanced speed/accuracy)
+--model llama3.2
+
+# Faster inference, good for rapid testing
+--model llama2
+
+# Code-optimized, good for structured reasoning
+--model codellama
+
+# Lightweight option for experimentation
+--model mistral
+
+# Larger models (if you have the compute)
+--model llama2:13b
+--model llama2:70b
+```
+
+#### Pulling New Models
+```bash
+# See available models at https://ollama.ai/library
+ollama pull qwen2
+ollama pull phi3
+ollama pull gemma
+
+# Then use them in SCM-Arena
+poetry run python -m scm_arena.cli run --model qwen2
+```
+
+### Scenario Selection Guide
+
+#### Scenario Descriptions & Use Cases
+```bash
+# Classic - Step demand change (4→8→4), tests shock response
+poetry run python -m scm_arena.cli run --scenario classic
+
+# Random - Stochastic demand, tests uncertainty handling  
+poetry run python -m scm_arena.cli run --scenario random
+
+# Shock - Periodic spikes, tests recovery ability
+poetry run python -m scm_arena.cli run --scenario shock
+
+# Seasonal - Cyclical patterns, tests pattern learning
+poetry run python -m scm_arena.cli run --scenario seasonal
+
+# Trend - Gradual growth, tests adaptation
+poetry run python -m scm_arena.cli run --scenario trend
+
+# Complex - Real-world combination of patterns
+poetry run python -m scm_arena.cli run --scenario complex
+```
+
+### Advanced Usage Examples
+
+#### Research Workflow
+```bash
+# 1. Test model availability and basic functionality
+poetry run python -m scm_arena.cli test-model --model llama3.2
+
+# 2. Quick benchmark to establish baseline
+poetry run python -m scm_arena.cli benchmark --scenario classic
+
+# 3. Focused comparison on key scenarios
+poetry run python -m scm_arena.cli compare \
+  --models llama3.2 llama2 mistral \
+  --scenarios classic shock seasonal \
+  --runs 3 --rounds 25
+
+# 4. Deep dive on specific model/scenario combination
+poetry run python -m scm_arena.cli run \
+  --model llama3.2 --scenario complex \
+  --rounds 50 --verbose
+```
+
+#### Systematic Model Evaluation
+```bash
+# Test all major model families
+for model in llama3.2 llama2 mistral codellama; do
+  echo "Testing $model..."
+  poetry run python -m scm_arena.cli run --model $model --scenario classic
+done
+
+# Compare performance across all scenarios
+poetry run python -m scm_arena.cli compare \
+  --models llama3.2 llama2 \
+  --scenarios classic random shock seasonal trend complex \
+  --runs 5
+```
+
+### Interpreting Results
+
+#### Key Metrics to Watch
+- **Total Cost**: Lower is better (primary metric)
+- **Bullwhip Ratio**: Closer to 1.0 indicates better coordination
+- **Service Level**: Higher percentage indicates better customer service
+- **Individual Costs**: Shows which supply chain tier performed best/worst
+
+#### Expected Performance Ranges
+```bash
+# Excellent performance
+Total Cost: < $300, Bullwhip Ratio: 1.0-1.5, Service Level: > 95%
+
+# Good performance  
+Total Cost: $300-500, Bullwhip Ratio: 1.5-2.5, Service Level: 85-95%
+
+# Poor performance
+Total Cost: > $500, Bullwhip Ratio: > 3.0, Service Level: < 85%
+```
+
+### Troubleshooting
+
+#### Common Issues & Solutions
+```bash
+# "Cannot connect to Ollama server"
+# Solution: Start Ollama in separate terminal
+ollama serve
+
+# "Model not found"
+# Solution: Pull the model first
+ollama pull llama3.2
+
+# "Connection timeout" 
+# Solution: Increase timeout or use smaller model
+poetry run python -m scm_arena.cli run --model mistral
+
+# "Invalid JSON response"
+# Solution: Model may need better prompting, try different model
+poetry run python -m scm_arena.cli test-model --model llama2
+```
+
+#### Performance Optimization
+```bash
+# For faster testing, use shorter rounds
+poetry run python -m scm_arena.cli run --rounds 10
+
+# For development, use smaller models
+poetry run python -m scm_arena.cli run --model mistral
+
+# For production benchmarks, use longer runs
+poetry run python -m scm_arena.cli compare --runs 10 --rounds 50
+```
+
+## Next Development Phases
+
+### Phase 2: Enhanced Evaluation & Metrics (Upcoming)
+**Goals**:
+- Statistical significance testing
+- Advanced performance analytics
 - Results export (CSV, JSON)
+- Visualization tools
 - Performance profiling
 
-### Medium Term
-- Web interface with FastAPI
-- Database storage (SQLite → PostgreSQL)
+### Phase 3: Web Interface (Future)
+**Goals**:
+- FastAPI backend service
+- React/Next.js leaderboard
 - Real-time game visualization
-- Multi-run statistical analysis
+- Model submission portal
+- Public results database
 
-### Long Term
-- Additional supply chain benchmarks
-- Human vs AI competitions
-- Integration with other LLM providers
-- Academic paper publication
+### Phase 4: Extended Benchmarks (Future)
+**Goals**:
+- Additional supply chain scenarios
+- Multi-modal evaluation (text + data)
+- Human vs AI comparisons
+- Industry-specific benchmarks
+
+## Production Deployment Notes
+
+### Local Development
+- All components run locally
+- No external dependencies beyond Ollama
+- Full functionality available offline
+
+### Future Hosting Architecture
+- Backend: FastAPI + PostgreSQL
+- Frontend: Next.js + Vercel
+- LLM Integration: Multiple providers
+- Evaluation Queue: Celery + Redis
 
 ## Resources and References
 
