@@ -1,222 +1,276 @@
 #!/bin/bash
-# Full Factorial SCM-Arena Experiment with Concurrent Processes
-# This runs the complete experimental design split across multiple parallel jobs
+# Fixed Full Factorial SCM-Arena Experiment - Concurrent Execution
+# FIXES: Array handling, error checking, better debugging
 
-echo "🚀 FULL FACTORIAL SCM-ARENA EXPERIMENT (CONCURRENT PROCESSES)"
-echo "================================================================="
+echo "🚀 FULL FACTORIAL SCM-ARENA EXPERIMENT - FIXED VERSION"
+echo "======================================================"
+
+# Configuration
+BASE_SEED=42
+TOTAL_RUNS=20
+TOTAL_ROUNDS=52
+MAX_CONCURRENT_JOBS=4  # Reduced for stability
+
+# Create output directory with timestamp
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+OUTPUT_DIR="full_factorial_${TIMESTAMP}"
+mkdir -p "$OUTPUT_DIR"
+
+echo "📁 Output directory: $OUTPUT_DIR"
+
+# Quick test first - let's run a single small experiment
 echo
-echo "📊 Complete Experimental Design:"
-echo "• Models: llama3.2"
-echo "• Memory: none, short, full (3 strategies)"
-echo "• Prompts: specific, neutral (2 types)"
-echo "• Visibility: local, adjacent, full (3 levels)"
-echo "• Scenarios: classic, random, shock, seasonal (4 scenarios)"
-echo "• Game Modes: modern, classic (2 modes)"
-echo "• Runs: 20 per condition"
-echo "• Rounds: 50 per game"
-echo
-echo "🎯 Total Conditions: 3×2×3×4×2 = 144"
-echo "📈 Total Experiments: 144×20 = 2,880"
-echo "⏱️  Estimated Time: 35-60 hours (with 4 parallel processes)"
-echo "🎲 Deterministic Seeding: Base seed 42"
+echo "🧪 RUNNING QUICK TEST FIRST..."
+echo "=============================="
+
+test_cmd="poetry run python -m scm_arena.cli experiment --models llama3.2 --memory none --prompts specific --visibility local --scenarios classic --game-modes modern --runs 1 --rounds 5 --base-seed 42 --deterministic --save-database --db-path ${OUTPUT_DIR}/test.db --save-results ${OUTPUT_DIR}/test.csv"
+
+echo "Test command: $test_cmd"
 echo
 
-read -p "🚀 Ready to run full factorial experiment? (y/N): " -n 1 -r
+# Run test
+echo "y" | $test_cmd > "${OUTPUT_DIR}/test.log" 2>&1
+test_exit_code=$?
+
+if [ $test_exit_code -eq 0 ]; then
+    echo "✅ Quick test PASSED - CLI working correctly"
+    
+    # Check if database was created
+    if [ -f "${OUTPUT_DIR}/test.db" ]; then
+        test_count=$(sqlite3 "${OUTPUT_DIR}/test.db" 'SELECT COUNT(*) FROM experiments' 2>/dev/null || echo '0')
+        echo "✅ Test database created with $test_count experiments"
+    else
+        echo "⚠️  Test database not found"
+    fi
+else
+    echo "❌ Quick test FAILED (exit code: $test_exit_code)"
+    echo "📋 Check the test log:"
+    echo "----------------------------------------"
+    cat "${OUTPUT_DIR}/test.log"
+    echo "----------------------------------------"
+    echo
+    echo "🛑 STOPPING - Fix the CLI issues before running full experiment"
+    exit 1
+fi
+
+echo
+read -p "✅ Test passed! Continue with full experiment? (y/N): " -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "❌ Experiment cancelled"
+    echo "❌ Full experiment cancelled"
     exit 0
 fi
 
-echo "🏃 Starting parallel experiment batches..."
 echo
+echo "🚀 STARTING FULL EXPERIMENT..."
+echo "============================="
 
-# Split the full experiment into 4 batches for parallel execution
-
-# BATCH 1: Memory strategy (none) + all other factors
-echo "🚀 Starting Batch 1: Memory strategy (none)..."
-echo "y" | poetry run python -m scm_arena.cli experiment \
-    --models llama3.2 \
-    --memory none \
-    --prompts specific \
-    --prompts neutral \
-    --visibility local \
-    --visibility adjacent \
-    --visibility full \
-    --scenarios classic \
-    --scenarios random \
-    --scenarios shock \
-    --scenarios seasonal \
-    --game-modes modern \
-    --game-modes classic \
-    --runs 20 \
-    --rounds 50 \
-    --base-seed 42 \
-    --deterministic \
-    --save-database \
-    --db-path batch1_memory_none.db \
-    --save-results batch1_results.csv &
-
-# BATCH 2: Memory strategy (short) + all other factors  
-echo "🚀 Starting Batch 2: Memory strategy (short)..."
-echo "y" | poetry run python -m scm_arena.cli experiment \
-    --models llama3.2 \
-    --memory short \
-    --prompts specific \
-    --prompts neutral \
-    --visibility local \
-    --visibility adjacent \
-    --visibility full \
-    --scenarios classic \
-    --scenarios random \
-    --scenarios shock \
-    --scenarios seasonal \
-    --game-modes modern \
-    --game-modes classic \
-    --runs 20 \
-    --rounds 50 \
-    --base-seed 42 \
-    --deterministic \
-    --save-database \
-    --db-path batch2_memory_short.db \
-    --save-results batch2_results.csv &
-
-# BATCH 3: Memory strategy (full) + all other factors
-echo "🚀 Starting Batch 3: Memory strategy (full)..."
-echo "y" | poetry run python -m scm_arena.cli experiment \
-    --models llama3.2 \
-    --memory full \
-    --prompts specific \
-    --prompts neutral \
-    --visibility local \
-    --visibility adjacent \
-    --visibility full \
-    --scenarios classic \
-    --scenarios random \
-    --scenarios shock \
-    --scenarios seasonal \
-    --game-modes modern \
-    --game-modes classic \
-    --runs 20 \
-    --rounds 50 \
-    --base-seed 42 \
-    --deterministic \
-    --save-database \
-    --db-path batch3_memory_full.db \
-    --save-results batch3_results.csv &
-
-# BATCH 4: Validation batch with mixed conditions
-echo "🚀 Starting Batch 4: Validation batch (cross-scenario testing)..."
-echo "y" | poetry run python -m scm_arena.cli experiment \
-    --models llama3.2 \
-    --memory none \
-    --memory short \
-    --memory full \
-    --prompts specific \
-    --visibility local \
-    --visibility full \
-    --scenarios classic \
-    --scenarios shock \
-    --game-modes modern \
-    --runs 20 \
-    --rounds 50 \
-    --base-seed 42 \
-    --deterministic \
-    --save-database \
-    --db-path batch4_validation.db \
-    --save-results batch4_validation.csv &
-
-echo "⏳ All 4 batches running in parallel. Monitoring progress..."
-echo "   Use 'jobs' to see running processes"
-echo "   Use 'kill %1 %2 %3 %4' to stop all if needed"
-echo
-
-# Function to show progress
-show_progress() {
-    while jobs %1 %2 %3 %4 >/dev/null 2>&1; do
-        echo "⏳ $(date '+%H:%M:%S') - Experiments still running..."
-        echo "   📊 Check database files for live progress:"
-        if [ -f "batch1_memory_none.db" ]; then
-            echo "   • Batch 1 (memory: none): $(sqlite3 batch1_memory_none.db 'SELECT COUNT(*) FROM experiments' 2>/dev/null || echo '0') experiments completed"
-        fi
-        if [ -f "batch2_memory_short.db" ]; then
-            echo "   • Batch 2 (memory: short): $(sqlite3 batch2_memory_short.db 'SELECT COUNT(*) FROM experiments' 2>/dev/null || echo '0') experiments completed"
-        fi
-        if [ -f "batch3_memory_full.db" ]; then
-            echo "   • Batch 3 (memory: full): $(sqlite3 batch3_memory_full.db 'SELECT COUNT(*) FROM experiments' 2>/dev/null || echo '0') experiments completed"
-        fi
-        if [ -f "batch4_validation.db" ]; then
-            echo "   • Batch 4 (validation): $(sqlite3 batch4_validation.db 'SELECT COUNT(*) FROM experiments' 2>/dev/null || echo '0') experiments completed"
-        fi
-        echo
-        sleep 300  # Check every 5 minutes
+# Fixed function to run experiment batches
+run_experiment_batch() {
+    local batch_name="$1"
+    local memory_strategies="$2"
+    local visibility_levels="$3" 
+    local scenarios="$4"
+    local batch_id="$5"
+    
+    echo "🚀 Starting Batch $batch_id: $batch_name" >&2
+    
+    local db_file="${OUTPUT_DIR}/batch_${batch_id}_${batch_name// /_}.db"
+    local csv_file="${OUTPUT_DIR}/batch_${batch_id}_${batch_name// /_}.csv"
+    local log_file="${OUTPUT_DIR}/batch_${batch_id}_${batch_name// /_}.log"
+    
+    # Build the command more carefully
+    local cmd="poetry run python -m scm_arena.cli experiment"
+    cmd="$cmd --models llama3.2"
+    
+    # Add memory strategies
+    for mem in $memory_strategies; do
+        cmd="$cmd --memory $mem"
     done
+    
+    # Add prompts (always both)
+    cmd="$cmd --prompts specific --prompts neutral"
+    
+    # Add visibility levels
+    for vis in $visibility_levels; do
+        cmd="$cmd --visibility $vis"
+    done
+    
+    # Add scenarios
+    for scenario in $scenarios; do
+        cmd="$cmd --scenarios $scenario"
+    done
+    
+    # Add game modes (always both)
+    cmd="$cmd --game-modes modern --game-modes classic"
+    
+    # Add other parameters
+    cmd="$cmd --runs $TOTAL_RUNS"
+    cmd="$cmd --rounds $TOTAL_ROUNDS"
+    cmd="$cmd --base-seed $BASE_SEED"
+    cmd="$cmd --deterministic"
+    cmd="$cmd --save-database"
+    cmd="$cmd --db-path $db_file"
+    cmd="$cmd --save-results $csv_file"
+    
+    # Log the command
+    {
+        echo "Batch: $batch_name"
+        echo "Command: $cmd"
+        echo "Started: $(date)"
+        echo "----------------------------------------"
+    } > "$log_file"
+    
+    # Run the experiment with proper input handling
+    echo "y" | $cmd >> "$log_file" 2>&1
+    local exit_code=$?
+    
+    # Log completion
+    {
+        echo "----------------------------------------"
+        echo "Finished: $(date)"
+        echo "Exit code: $exit_code"
+    } >> "$log_file"
+    
+    if [ $exit_code -eq 0 ]; then
+        # Count experiments in database
+        local exp_count=0
+        if [ -f "$db_file" ]; then
+            exp_count=$(sqlite3 "$db_file" 'SELECT COUNT(*) FROM experiments' 2>/dev/null || echo '0')
+        fi
+        echo "✅ Batch $batch_id completed: $exp_count experiments" >&2
+    else
+        echo "❌ Batch $batch_id failed (exit code: $exit_code)" >&2
+    fi
+    
+    return $exit_code
 }
 
-# Start progress monitoring in background
-show_progress &
-PROGRESS_PID=$!
+# Export function and variables
+export -f run_experiment_batch
+export OUTPUT_DIR TOTAL_RUNS TOTAL_ROUNDS BASE_SEED
 
-# Wait for all experiments to complete
-wait
+# Simplified batch definitions (fewer batches for testing)
+declare -a batches=(
+    "Memory_None|none|local adjacent full|classic random|1"
+    "Memory_Short|short|local adjacent full|classic random|2"
+    "Memory_Full|full|local adjacent full|classic random|3"
+    "Validation|none short full|local full|shock seasonal|4"
+)
 
-# Stop progress monitoring
-kill $PROGRESS_PID 2>/dev/null
+# Track running jobs with fixed array handling
+declare -a job_pids=()
+declare -a job_names=()
+
+echo "Starting ${#batches[@]} experiment batches..."
+echo
+
+# Start batches with improved job management
+for batch_spec in "${batches[@]}"; do
+    # Parse batch specification
+    IFS='|' read -r batch_name memory_strategies visibility_levels scenarios batch_id <<< "$batch_spec"
+    
+    # Wait if we've hit the concurrency limit
+    while [ ${#job_pids[@]} -ge $MAX_CONCURRENT_JOBS ]; do
+        echo "⏳ $(date '+%H:%M:%S') - Waiting for job slot (${#job_pids[@]}/$MAX_CONCURRENT_JOBS running)..."
+        
+        # Check for completed jobs
+        new_pids=()
+        new_names=()
+        
+        for i in "${!job_pids[@]}"; do
+            if kill -0 "${job_pids[$i]}" 2>/dev/null; then
+                # Job still running
+                new_pids+=("${job_pids[$i]}")
+                new_names+=("${job_names[$i]}")
+            else
+                # Job completed
+                echo "✅ Job ${job_pids[$i]} (${job_names[$i]}) completed"
+            fi
+        done
+        
+        # Update arrays
+        job_pids=("${new_pids[@]}")
+        job_names=("${new_names[@]}")
+        
+        sleep 10
+    done
+    
+    # Start the batch
+    echo "▶️  Starting Batch $batch_id: $batch_name"
+    run_experiment_batch "$batch_name" "$memory_strategies" "$visibility_levels" "$scenarios" "$batch_id" &
+    
+    # Add to tracking arrays
+    job_pids+=($!)
+    job_names+=("$batch_name")
+    
+    echo "   Job PID: $! (${#job_pids[@]}/$MAX_CONCURRENT_JOBS slots used)"
+    
+    # Brief delay to stagger starts
+    sleep 5
+done
 
 echo
-echo "🎉 ALL EXPERIMENTS COMPLETED!"
-echo "=============================="
+echo "🔄 ALL BATCHES STARTED - WAITING FOR COMPLETION"
+echo "==============================================="
+
+# Wait for all jobs to complete
+echo "Waiting for jobs: ${job_pids[*]}"
+
+for i in "${!job_pids[@]}"; do
+    echo "⏳ Waiting for ${job_names[$i]} (PID: ${job_pids[$i]})..."
+    wait "${job_pids[$i]}"
+    echo "✅ ${job_names[$i]} finished"
+done
+
 echo
+echo "🎉 ALL BATCHES COMPLETED!"
+echo "========================"
 
-# Show final results
-echo "📊 Final Results Summary:"
-echo "------------------------"
+# Results summary
+echo "📊 RESULTS SUMMARY:"
+echo "------------------"
 
-if [ -f "batch1_memory_none.db" ]; then
-    batch1_count=$(sqlite3 batch1_memory_none.db 'SELECT COUNT(*) FROM experiments' 2>/dev/null || echo '0')
-    echo "• Batch 1 (memory: none): ${batch1_count} experiments"
+total_experiments=0
+successful_batches=0
+failed_batches=0
+
+for db_file in "$OUTPUT_DIR"/batch_*.db; do
+    if [ -f "$db_file" ]; then
+        exp_count=$(sqlite3 "$db_file" 'SELECT COUNT(*) FROM experiments' 2>/dev/null || echo '0')
+        batch_name=$(basename "$db_file" .db)
+        
+        if [ "$exp_count" -gt 0 ]; then
+            echo "✅ $batch_name: $exp_count experiments"
+            total_experiments=$((total_experiments + exp_count))
+            successful_batches=$((successful_batches + 1))
+        else
+            echo "❌ $batch_name: 0 experiments (failed)"
+            failed_batches=$((failed_batches + 1))
+        fi
+    fi
+done
+
+echo
+echo "📈 SUMMARY:"
+echo "• Total experiments: $total_experiments"
+echo "• Successful batches: $successful_batches"
+echo "• Failed batches: $failed_batches"
+
+if [ $failed_batches -gt 0 ]; then
+    echo
+    echo "🔍 CHECK FAILED BATCH LOGS:"
+    for log_file in "$OUTPUT_DIR"/batch_*.log; do
+        if [ -f "$log_file" ]; then
+            batch_name=$(basename "$log_file" .log)
+            db_file="${log_file%.log}.db"
+            if [ ! -f "$db_file" ] || [ "$(sqlite3 "$db_file" 'SELECT COUNT(*) FROM experiments' 2>/dev/null || echo '0')" -eq 0 ]; then
+                echo "❌ $batch_name - check $log_file"
+            fi
+        fi
+    done
 fi
 
-if [ -f "batch2_memory_short.db" ]; then
-    batch2_count=$(sqlite3 batch2_memory_short.db 'SELECT COUNT(*) FROM experiments' 2>/dev/null || echo '0')
-    echo "• Batch 2 (memory: short): ${batch2_count} experiments"
-fi
-
-if [ -f "batch3_memory_full.db" ]; then
-    batch3_count=$(sqlite3 batch3_memory_full.db 'SELECT COUNT(*) FROM experiments' 2>/dev/null || echo '0')
-    echo "• Batch 3 (memory: full): ${batch3_count} experiments"
-fi
-
-if [ -f "batch4_validation.db" ]; then
-    batch4_count=$(sqlite3 batch4_validation.db 'SELECT COUNT(*) FROM experiments' 2>/dev/null || echo '0')
-    echo "• Batch 4 (validation): ${batch4_count} experiments"
-fi
-
-total_experiments=$((${batch1_count:-0} + ${batch2_count:-0} + ${batch3_count:-0} + ${batch4_count:-0}))
-echo "• Total: ${total_experiments} experiments completed"
-
 echo
-echo "📁 Output Files:"
-echo "---------------"
-echo "• batch1_memory_none.db + batch1_results.csv"
-echo "• batch2_memory_short.db + batch2_results.csv"  
-echo "• batch3_memory_full.db + batch3_results.csv"
-echo "• batch4_validation.db + batch4_validation.csv"
-echo
-
-echo "🔍 Next Steps:"
-echo "-------------"
-echo "1. Analyze results by memory strategy:"
-echo "   python comprehensive_test.py batch1_memory_none.db"
-echo "   python comprehensive_test.py batch2_memory_short.db"
-echo "   python comprehensive_test.py batch3_memory_full.db"
-echo
-echo "2. Merge databases (optional):"
-echo "   # Use SQLite commands to merge the databases if needed"
-echo
-echo "3. Verify results with validation batch:"
-echo "   python comprehensive_test.py batch4_validation.db"
-echo
-echo "🎯 Full factorial experiment complete with deterministic seeding!"
-echo "✅ Each condition used unique, reproducible seeds"
-echo "✅ Results are scientifically valid and reproducible"
+echo "📁 All results in: $OUTPUT_DIR/"
+echo "🎯 Next: Analyze logs and fix any issues before running full-scale experiment"
