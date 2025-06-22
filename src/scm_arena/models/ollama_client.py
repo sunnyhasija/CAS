@@ -1,5 +1,3 @@
-
-
 import json
 import requests
 import time
@@ -12,6 +10,7 @@ CANONICAL_TEMPERATURE = 0.3    # Balanced decision-making (not too rigid, not to
 CANONICAL_TOP_P = 0.9          # Standard nucleus sampling (industry default)
 CANONICAL_TOP_K = 40           # Reasonable exploration window
 CANONICAL_REPEAT_PENALTY = 1.1 # Slight anti-repetition bias
+CANONICAL_SEED = 42            # Fixed seed for reproducible results
 
 
 class OllamaAgent(Agent):
@@ -24,6 +23,7 @@ class OllamaAgent(Agent):
     Implements SCM-Arena canonical settings for benchmark consistency.
     
     FIXED: Memory window now applied consistently to all decision history data.
+    UPDATED: Now includes full seed integration for reproducible experiments.
     """
     
     def __init__(
@@ -35,6 +35,7 @@ class OllamaAgent(Agent):
         top_p: float = CANONICAL_TOP_P,
         top_k: int = CANONICAL_TOP_K,
         repeat_penalty: float = CANONICAL_REPEAT_PENALTY,
+        seed: int = CANONICAL_SEED,
         max_retries: int = 3,
         timeout: float = 30.0,
         neutral_prompt: bool = False,
@@ -42,7 +43,7 @@ class OllamaAgent(Agent):
         name: Optional[str] = None
     ):
         """
-        Initialize Ollama agent with canonical benchmark settings.
+        Initialize Ollama agent with canonical benchmark settings including seed.
         
         Args:
             position: Supply chain position
@@ -52,6 +53,7 @@ class OllamaAgent(Agent):
             top_p: Nucleus sampling parameter (canonical: 0.9)
             top_k: Top-k sampling parameter (canonical: 40)
             repeat_penalty: Repetition penalty (canonical: 1.1)
+            seed: Random seed for reproducibility (canonical: 42)
             max_retries: Maximum API retry attempts
             timeout: Request timeout in seconds
             neutral_prompt: Use neutral prompts instead of position-specific ones
@@ -65,6 +67,7 @@ class OllamaAgent(Agent):
         self.top_p = top_p
         self.top_k = top_k
         self.repeat_penalty = repeat_penalty
+        self.seed = seed
         self.max_retries = max_retries
         self.timeout = timeout
         self.neutral_prompt = neutral_prompt
@@ -87,7 +90,8 @@ class OllamaAgent(Agent):
         
         # Log canonical settings usage
         if (temperature == CANONICAL_TEMPERATURE and top_p == CANONICAL_TOP_P and 
-            top_k == CANONICAL_TOP_K and repeat_penalty == CANONICAL_REPEAT_PENALTY):
+            top_k == CANONICAL_TOP_K and repeat_penalty == CANONICAL_REPEAT_PENALTY and
+            seed == CANONICAL_SEED):
             self._using_canonical = True
         else:
             self._using_canonical = False
@@ -274,7 +278,8 @@ The order must be a non-negative integer. Provide no other text outside the JSON
             'temperature': self.temperature,
             'top_p': self.top_p,
             'top_k': self.top_k,
-            'repeat_penalty': self.repeat_penalty
+            'repeat_penalty': self.repeat_penalty,
+            'seed': self.seed
         }
         
         # Get LLM response with retries
@@ -399,7 +404,7 @@ The order must be a non-negative integer. Provide no other text outside the JSON
         return "\n".join(prompt_parts)
     
     def _call_ollama(self, user_prompt: str) -> str:
-        """Make API call to Ollama with canonical settings"""
+        """Make API call to Ollama with canonical settings including seed"""
         # Prepare request payload with canonical settings
         payload = {
             "model": self.model_name,
@@ -413,6 +418,7 @@ The order must be a non-negative integer. Provide no other text outside the JSON
                 "top_p": self.top_p,
                 "top_k": self.top_k,
                 "repeat_penalty": self.repeat_penalty,
+                "seed": self.seed,
                 "num_predict": 100,  # Limit response length
             }
         }
@@ -504,6 +510,7 @@ The order must be a non-negative integer. Provide no other text outside the JSON
             "top_p": self.top_p,
             "top_k": self.top_k,
             "repeat_penalty": self.repeat_penalty,
+            "seed": self.seed,
             "using_canonical": self._using_canonical
         }
     
@@ -522,6 +529,7 @@ def create_ollama_agents(
     top_p: float = CANONICAL_TOP_P,
     top_k: int = CANONICAL_TOP_K,
     repeat_penalty: float = CANONICAL_REPEAT_PENALTY,
+    seed: int = CANONICAL_SEED,
     **kwargs
 ) -> Dict[Position, OllamaAgent]:
     """
@@ -536,6 +544,7 @@ def create_ollama_agents(
         top_p: Nucleus sampling parameter (canonical: 0.9)
         top_k: Top-k sampling parameter (canonical: 40)
         repeat_penalty: Repetition penalty (canonical: 1.1)
+        seed: Random seed for reproducibility (canonical: 42)
         **kwargs: Additional arguments passed to OllamaAgent
         
     Returns:
@@ -552,6 +561,7 @@ def create_ollama_agents(
             top_p=top_p,
             top_k=top_k,
             repeat_penalty=repeat_penalty,
+            seed=seed,
             **kwargs
         )
         for position in Position
@@ -587,5 +597,6 @@ def get_canonical_settings() -> Dict[str, Any]:
         "top_p": CANONICAL_TOP_P,
         "top_k": CANONICAL_TOP_K,
         "repeat_penalty": CANONICAL_REPEAT_PENALTY,
+        "seed": CANONICAL_SEED,
         "description": "SCM-Arena canonical settings for reproducible benchmarking"
     }

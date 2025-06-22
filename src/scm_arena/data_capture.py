@@ -3,6 +3,8 @@ Comprehensive data capture system for SCM-Arena experiments with canonical setti
 
 MAJOR UPDATE: Added support for tracking canonical LLM settings (temperature, top_p, etc.)
 for complete reproducibility and benchmark compliance verification.
+
+UPDATED: Now uses deterministic seeding instead of hardcoded seed.
 """
 
 import sqlite3
@@ -36,6 +38,9 @@ class ExperimentMetadata:
     top_p: float
     top_k: int
     repeat_penalty: float
+    seed: int
+    base_seed: int  # NEW: Track base seed for reproducibility
+    deterministic_seeding: bool  # NEW: Track seeding method
 
 
 @dataclass
@@ -68,7 +73,7 @@ class AgentRoundData:
 
 
 class ExperimentDatabase:
-    """SQLite database for storing experimental data with canonical settings"""
+    """SQLite database for storing experimental data with deterministic seeding"""
     
     def __init__(self, db_path: str = "scm_arena_experiments.db"):
         """Initialize database connection and create tables if needed"""
@@ -80,7 +85,7 @@ class ExperimentDatabase:
     def _create_tables(self):
         """Create database tables if they don't exist"""
         
-        # Experiments table - one row per experimental run (UPDATED with canonical settings)
+        # Experiments table - one row per experimental run (UPDATED with deterministic seeding fields)
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS experiments (
                 experiment_id TEXT PRIMARY KEY,
@@ -100,7 +105,10 @@ class ExperimentDatabase:
                 temperature REAL NOT NULL,
                 top_p REAL NOT NULL,
                 top_k INTEGER NOT NULL,
-                repeat_penalty REAL NOT NULL
+                repeat_penalty REAL NOT NULL,
+                seed INTEGER NOT NULL,
+                base_seed INTEGER NOT NULL,
+                deterministic_seeding BOOLEAN NOT NULL
             )
         """)
         
@@ -160,14 +168,15 @@ class ExperimentDatabase:
                 experiment_id, model_name, memory_strategy, memory_window,
                 prompt_type, visibility_level, scenario, game_mode,
                 rounds, run_number, timestamp, total_cost, service_level, bullwhip_ratio,
-                temperature, top_p, top_k, repeat_penalty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                temperature, top_p, top_k, repeat_penalty, seed, base_seed, deterministic_seeding
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             metadata.experiment_id, metadata.model_name, metadata.memory_strategy,
             metadata.memory_window, metadata.prompt_type, metadata.visibility_level,
             metadata.scenario, metadata.game_mode, metadata.rounds, metadata.run_number,
             metadata.timestamp, metadata.total_cost, metadata.service_level, metadata.bullwhip_ratio,
-            metadata.temperature, metadata.top_p, metadata.top_k, metadata.repeat_penalty
+            metadata.temperature, metadata.top_p, metadata.top_k, metadata.repeat_penalty, 
+            metadata.seed, metadata.base_seed, metadata.deterministic_seeding
         ))
         
         self.conn.commit()
@@ -229,7 +238,7 @@ class ExperimentDatabase:
 
 
 class ExperimentTracker:
-    """High-level interface for tracking experiments with canonical settings"""
+    """High-level interface for tracking experiments with deterministic seeding"""
     
     def __init__(self, db_path: str = "scm_arena_experiments.db"):
         self.db = ExperimentDatabase(db_path)
@@ -239,8 +248,10 @@ class ExperimentTracker:
                         prompt_type: str, visibility_level: str, scenario: str,
                         game_mode: str, rounds: int, run_number: int,
                         temperature: float = 0.3, top_p: float = 0.9, 
-                        top_k: int = 40, repeat_penalty: float = 1.1) -> str:
-        """Start tracking a new experiment with canonical settings"""
+                        top_k: int = 40, repeat_penalty: float = 1.1, 
+                        seed: int = 42, base_seed: int = 42, 
+                        deterministic_seeding: bool = True) -> str:
+        """Start tracking a new experiment with deterministic seeding support"""
         
         self.current_experiment_id = str(uuid.uuid4())
         
@@ -262,7 +273,10 @@ class ExperimentTracker:
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
-            repeat_penalty=repeat_penalty
+            repeat_penalty=repeat_penalty,
+            seed=seed,
+            base_seed=base_seed,
+            deterministic_seeding=deterministic_seeding
         )
         
         return self.db.start_experiment(metadata)
@@ -325,14 +339,15 @@ class ExperimentTracker:
         self.db.close()
     
     def get_canonical_settings_summary(self) -> Dict[str, Any]:
-        """Get summary of canonical settings usage in database"""
+        """Get summary of canonical settings usage in database (including seeding info)"""
         try:
             cursor = self.db.conn.execute("""
                 SELECT 
-                    temperature, top_p, top_k, repeat_penalty,
+                    temperature, top_p, top_k, repeat_penalty, 
+                    base_seed, deterministic_seeding,
                     COUNT(*) as experiment_count
                 FROM experiments 
-                GROUP BY temperature, top_p, top_k, repeat_penalty
+                GROUP BY temperature, top_p, top_k, repeat_penalty, base_seed, deterministic_seeding
                 ORDER BY experiment_count DESC
             """)
             
@@ -345,12 +360,74 @@ class ExperimentTracker:
                     'top_p': row[1], 
                     'top_k': row[2],
                     'repeat_penalty': row[3],
-                    'experiment_count': row[4]
+                    'base_seed': row[4],
+                    'deterministic_seeding': bool(row[5]),
+                    'experiment_count': row[6]
                 })
             
             return {
                 'canonical_settings_usage': settings_summary,
                 'total_experiments': sum(s['experiment_count'] for s in settings_summary)
+            }
+            
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def get_reproducibility_report(self) -> Dict[str, Any]:
+        """Get detailed reproducibility report including seeding methodology"""
+        try:
+            # Check seeding method usage
+            cursor = self.db.conn.execute("""
+                SELECT deterministic_seeding, base_seed, COUNT(*) as count
+                FROM experiments 
+                GROUP BY deterministic_seeding, base_seed
+                ORDER BY count DESC
+            """)
+            
+            seeding_usage = cursor.fetchall()
+            
+            # Check for identical experimental conditions with deterministic seeding
+            cursor = self.db.conn.execute("""
+                SELECT 
+                    model_name, memory_strategy, prompt_type, visibility_level, 
+                    scenario, game_mode, base_seed, deterministic_seeding,
+                    COUNT(*) as replications,
+                    COUNT(DISTINCT seed) as unique_seeds
+                FROM experiments 
+                WHERE deterministic_seeding = 1
+                GROUP BY model_name, memory_strategy, prompt_type, visibility_level, 
+                         scenario, game_mode, base_seed, deterministic_seeding
+                HAVING COUNT(*) > 1
+                ORDER BY replications DESC
+            """)
+            
+            replicated_conditions = cursor.fetchall()
+            
+            # Check seed uniqueness within deterministic experiments
+            cursor = self.db.conn.execute("""
+                SELECT COUNT(*) as total_seeds, COUNT(DISTINCT seed) as unique_seeds
+                FROM experiments 
+                WHERE deterministic_seeding = 1
+            """)
+            
+            seed_stats = cursor.fetchone()
+            
+            return {
+                'seeding_usage': [
+                    {
+                        'deterministic': bool(row[0]), 
+                        'base_seed': row[1], 
+                        'experiments': row[2]
+                    } for row in seeding_usage
+                ],
+                'replicated_conditions': len(replicated_conditions),
+                'seed_uniqueness': {
+                    'total_seeds': seed_stats[0] if seed_stats else 0,
+                    'unique_seeds': seed_stats[1] if seed_stats else 0,
+                    'collision_rate': (1 - (seed_stats[1] / seed_stats[0])) if seed_stats and seed_stats[0] > 0 else 0
+                },
+                'reproducible': len(replicated_conditions) > 0,
+                'deterministic_experiments': sum(row[2] for row in seeding_usage if row[0])
             }
             
         except Exception as e:

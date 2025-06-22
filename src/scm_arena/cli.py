@@ -1,10 +1,7 @@
 """
-Enhanced command-line interface for SCM-Arena with FIXED experimental defaults.
+Enhanced command-line interface for SCM-Arena with FIXED deterministic seeding.
 
-CRITICAL BUG FIX: Now includes all experimental factors in default settings
-- Adjacent visibility included in default visibility levels
-- Classic game mode included in default game modes
-- Ensures complete experimental coverage in default runs
+CRITICAL FIX: Now properly implements deterministic seeding with unique seeds per condition.
 """
 
 import click
@@ -22,6 +19,9 @@ from .beer_game.agents import Position, SimpleAgent, RandomAgent, OptimalAgent
 from .models.ollama_client import OllamaAgent, test_ollama_connection, create_ollama_agents
 from .evaluation.scenarios import DEMAND_PATTERNS
 
+# NEW: Import deterministic seeding system
+from .utils.seeding import ExperimentSeeder, get_seed_for_condition, DEFAULT_BASE_SEED
+
 # Import visualization with try/except in case it's not available
 try:
     from .visualization.plots import plot_game_analysis, create_game_summary_report
@@ -38,7 +38,6 @@ except ImportError:
 console = Console()
 
 # CANONICAL BENCHMARK SETTINGS
-# These settings ensure consistent, reproducible evaluation across all models
 CANONICAL_TEMPERATURE = 0.3    # Balanced decision-making (not too rigid, not too random)
 CANONICAL_TOP_P = 0.9          # Standard nucleus sampling (industry default)
 CANONICAL_TOP_K = 40           # Reasonable exploration window
@@ -63,14 +62,18 @@ def main():
               help='Memory strategy: none=0, short=5, medium=10, full=all decisions')
 @click.option('--visibility', type=click.Choice(['local', 'adjacent', 'full']), 
               default='local', help='Information visibility level')
+@click.option('--base-seed', default=DEFAULT_BASE_SEED, help=f'Base seed for deterministic generation (default: {DEFAULT_BASE_SEED})')
+@click.option('--deterministic/--fixed', default=True, help='Use deterministic seeding (default) vs fixed seed')
+@click.option('--run-number', default=1, help='Run number for this condition (affects seed generation)')
 @click.option('--plot', '-p', is_flag=True, help='Generate analysis plots')
 @click.option('--save-analysis', help='Save complete analysis to directory')
 @click.option('--save-database', is_flag=True, help='Save detailed data to database')
 @click.option('--db-path', default='scm_arena_experiments.db', help='Database file path')
 def run(model: str, scenario: str, rounds: int, verbose: bool, classic_mode: bool, 
-        neutral_prompts: bool, memory: str, visibility: str, plot: bool, save_analysis: str,
+        neutral_prompts: bool, memory: str, visibility: str, base_seed: int, 
+        deterministic: bool, run_number: int, plot: bool, save_analysis: str, 
         save_database: bool, db_path: str):
-    """Run a single Beer Game with specified conditions using canonical LLM settings"""
+    """Run a single Beer Game with specified conditions using deterministic seeding"""
     
     # Check Ollama connection
     if not test_ollama_connection():
@@ -78,15 +81,38 @@ def run(model: str, scenario: str, rounds: int, verbose: bool, classic_mode: boo
         console.print("Make sure Ollama is running: [cyan]ollama serve[/cyan]")
         return
     
+    # Initialize seeder
+    seeder = ExperimentSeeder(base_seed=base_seed, deterministic=deterministic)
+    
+    # Generate seed for this specific condition
+    prompt_type = "neutral" if neutral_prompts else "specific"
+    game_mode = "classic" if classic_mode else "modern"
+    
+    if deterministic:
+        seed = seeder.get_seed(
+            model=model,
+            memory=memory,
+            prompt=prompt_type,
+            visibility=visibility,
+            scenario=scenario,
+            mode=game_mode,
+            run=run_number
+        )
+    else:
+        seed = base_seed
+    
     console.print(f"[green]✅ Connected to Ollama server[/green]")
     console.print(f"[blue]🎯 Using canonical settings: temp={CANONICAL_TEMPERATURE}, top_p={CANONICAL_TOP_P}[/blue]")
+    
+    seeding_method = "deterministic" if deterministic else "fixed"
+    console.print(f"[blue]🎲 {seeding_method.title()} seed: {seed} for {model}-{memory}-{prompt_type}-{visibility}-{scenario}-{game_mode}-run{run_number}[/blue]")
     
     # Convert parameters
     memory_windows = {'none': 0, 'short': 5, 'medium': 10, 'full': None}
     memory_window = memory_windows[memory]
     visibility_level = VisibilityLevel(visibility)
     
-    # Create agents with canonical settings
+    # Create agents with determined seed
     try:
         agents = create_ollama_agents(
             model, 
@@ -95,10 +121,10 @@ def run(model: str, scenario: str, rounds: int, verbose: bool, classic_mode: boo
             temperature=CANONICAL_TEMPERATURE,
             top_p=CANONICAL_TOP_P,
             top_k=CANONICAL_TOP_K,
-            repeat_penalty=CANONICAL_REPEAT_PENALTY
+            repeat_penalty=CANONICAL_REPEAT_PENALTY,
+            seed=seed
         )
         
-        prompt_type = "Neutral" if neutral_prompts else "Position-specific"
         memory_desc = f"{memory} memory ({memory_window if memory_window is not None else 'all'} decisions)"
         console.print(f"[green]✅ Created agents: {model} ({prompt_type} prompts, {memory_desc}, {visibility} visibility)[/green]")
         
@@ -106,8 +132,12 @@ def run(model: str, scenario: str, rounds: int, verbose: bool, classic_mode: boo
         console.print(f"[red]❌ Failed to create agents: {e}[/red]")
         return
     
-    # Get demand pattern
-    demand_pattern = DEMAND_PATTERNS.get(scenario, DEMAND_PATTERNS['classic'])[:rounds]
+    # Get demand pattern (potentially seeded for random scenarios)
+    if scenario == "random" and deterministic:
+        from .evaluation.scenarios import generate_scenario_with_seed
+        demand_pattern = generate_scenario_with_seed(scenario, rounds, seed=seed)
+    else:
+        demand_pattern = DEMAND_PATTERNS.get(scenario, DEMAND_PATTERNS['classic'])[:rounds]
     
     # Initialize game with appropriate settings
     if classic_mode:
@@ -146,6 +176,9 @@ def run(model: str, scenario: str, rounds: int, verbose: bool, classic_mode: boo
     # Display results
     display_results(results, game_history)
     
+    # Show seed info
+    console.print(f"\n[cyan]🔄 Reproducibility: Use --base-seed {base_seed} --run-number {run_number} --{'deterministic' if deterministic else 'fixed'} to reproduce this exact result[/cyan]")
+    
     # Generate plots if requested
     if plot and plot_game_analysis:
         console.print("\n[blue]📊 Generating analysis plots...[/blue]")
@@ -183,26 +216,33 @@ def run(model: str, scenario: str, rounds: int, verbose: bool, classic_mode: boo
               type=click.Choice(['modern', 'classic']), help='Game mode settings')
 @click.option('--runs', default=3, help='Number of runs per condition')
 @click.option('--rounds', default=20, help='Rounds per game')
+@click.option('--base-seed', default=DEFAULT_BASE_SEED, help=f'Base seed for deterministic generation (default: {DEFAULT_BASE_SEED})')
+@click.option('--deterministic/--fixed', default=True, help='Use deterministic seeding (default) vs fixed seed')
 @click.option('--save-results', help='Save results to CSV file')
 @click.option('--save-database', is_flag=True, help='Save detailed data to database')
 @click.option('--db-path', default='scm_arena_experiments.db', help='Database file path')
 def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple, 
-               scenarios: tuple, game_modes: tuple, runs: int, rounds: int, save_results: str,
+               scenarios: tuple, game_modes: tuple, runs: int, rounds: int, 
+               base_seed: int, deterministic: bool, save_results: str, 
                save_database: bool, db_path: str):
     """
-    Run fully crossed experimental design with canonical LLM settings.
+    Run fully crossed experimental design with deterministic seeding.
     
-    FIXED: Now includes complete experimental factors in defaults:
-    - All visibility levels: local, adjacent, full
-    - All game modes: modern, classic
+    Each experimental condition gets a unique, reproducible seed based on its parameters.
     """
     
     if not test_ollama_connection():
         console.print("[red]❌ Cannot connect to Ollama server[/red]")
         return
     
+    # Initialize seeder
+    seeder = ExperimentSeeder(base_seed=base_seed, deterministic=deterministic)
+    
     console.print(f"[blue]🎯 Using SCM-Arena canonical settings for all experiments:[/blue]")
     console.print(f"[blue]   Temperature: {CANONICAL_TEMPERATURE} | Top_P: {CANONICAL_TOP_P} | Top_K: {CANONICAL_TOP_K}[/blue]")
+    
+    seeding_method = "Hash-based per condition" if deterministic else "Fixed seed"
+    console.print(f"[blue]🎲 Seeding: {seeding_method} (base_seed={base_seed})[/blue]")
     
     # Initialize data capture if requested
     tracker = None
@@ -224,15 +264,15 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
     total_experiments = len(conditions) * runs
     
     console.print(Panel(
-        f"""[bold blue]🧪 SCM-Arena Canonical Benchmark Study[/bold blue]
+        f"""[bold blue]🧪 SCM-Arena Deterministic Benchmark Study[/bold blue]
         
 📊 Experimental Factors:
 • Models: {len(models)} ({', '.join(models)})
 • Memory: {len(memory)} ({', '.join(memory)})  
 • Prompts: {len(prompts)} ({', '.join(prompts)})
-• Visibility: {len(visibility)} ({', '.join(visibility)}) [FIXED: Complete coverage]
+• Visibility: {len(visibility)} ({', '.join(visibility)})
 • Scenarios: {len(scenarios)} ({', '.join(scenarios)})
-• Game Modes: {len(game_modes)} ({', '.join(game_modes)}) [FIXED: Complete coverage]
+• Game Modes: {len(game_modes)} ({', '.join(game_modes)})
 
 🎯 Total Conditions: {len(conditions)}
 🔄 Runs per Condition: {runs}
@@ -245,11 +285,15 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
 • Top_K: {CANONICAL_TOP_K}
 • Repeat Penalty: {CANONICAL_REPEAT_PENALTY}
 
-✅ FIXED: Complete experimental coverage with all visibility levels and game modes""",
+🎲 Deterministic Seeding:
+• Base Seed: {base_seed}
+• Method: {seeding_method}
+• Reproducible: ✅ Each condition gets consistent seed across runs
+• Statistical: ✅ Different runs get different seeds for validity""",
         title="Benchmark Configuration"
     ))
     
-    if not click.confirm("Proceed with canonical benchmark run?"):
+    if not click.confirm("Proceed with deterministic benchmark run?"):
         return
     
     results = []
@@ -272,6 +316,20 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
                     visibility_level = VisibilityLevel(vis)
                     classic_mode = (game_mode == 'classic')
                     
+                    # FIXED: Generate deterministic seed for this condition
+                    if deterministic:
+                        seed = seeder.get_seed(
+                            model=model,
+                            memory=mem,
+                            prompt=prompt_type,
+                            visibility=vis,
+                            scenario=scenario,
+                            mode=game_mode,
+                            run=run + 1
+                        )
+                    else:
+                        seed = base_seed
+                    
                     # Start database tracking if enabled
                     if tracker:
                         experiment_id = tracker.start_experiment(
@@ -287,10 +345,13 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
                             temperature=CANONICAL_TEMPERATURE,
                             top_p=CANONICAL_TOP_P,
                             top_k=CANONICAL_TOP_K,
-                            repeat_penalty=CANONICAL_REPEAT_PENALTY
+                            repeat_penalty=CANONICAL_REPEAT_PENALTY,
+                            seed=seed,
+                            base_seed=base_seed,
+                            deterministic_seeding=deterministic
                         )
                     
-                    # Create agents with canonical settings
+                    # Create agents with deterministic seed
                     agents = create_ollama_agents(
                         model, 
                         neutral_prompt=neutral_prompt,
@@ -298,11 +359,16 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
                         temperature=CANONICAL_TEMPERATURE,
                         top_p=CANONICAL_TOP_P,
                         top_k=CANONICAL_TOP_K,
-                        repeat_penalty=CANONICAL_REPEAT_PENALTY
+                        repeat_penalty=CANONICAL_REPEAT_PENALTY,
+                        seed=seed
                     )
                     
-                    # Create game
-                    demand_pattern = DEMAND_PATTERNS.get(scenario, DEMAND_PATTERNS['classic'])[:rounds]
+                    # Create game with potentially seeded scenarios
+                    if scenario == "random" and deterministic:
+                        from .evaluation.scenarios import generate_scenario_with_seed
+                        demand_pattern = generate_scenario_with_seed(scenario, rounds, seed=seed)
+                    else:
+                        demand_pattern = DEMAND_PATTERNS.get(scenario, DEMAND_PATTERNS['classic'])[:rounds]
                     
                     if classic_mode:
                         game = create_classic_beer_game(agents, demand_pattern)
@@ -391,20 +457,23 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
                         'top_p': CANONICAL_TOP_P,
                         'top_k': CANONICAL_TOP_K,
                         'repeat_penalty': CANONICAL_REPEAT_PENALTY,
+                        'seed': seed,
+                        'base_seed': base_seed,
+                        'deterministic': deterministic,
                         **summary
                     }
                     
                     results.append(result)
                     
-                    console.print(f"✅ {model}-{mem}-{prompt_type}-{vis}-{scenario}-{game_mode} Run {run+1}: Cost=${summary['total_cost']:.0f}")
+                    console.print(f"✅ {model}-{mem}-{prompt_type}-{vis}-{scenario}-{game_mode} Run {run+1}: Cost=${summary['total_cost']:.0f} (seed={seed})")
                     
                 except Exception as e:
                     console.print(f"[red]❌ Failed: {model}-{mem}-{prompt_type}-{vis}-{scenario}-{game_mode} Run {run+1}: {e}[/red]")
                     
                 progress.update(task, advance=1)
     
-    # Display experimental results
-    display_experimental_results(results)
+    # Display experimental results with seeding info
+    display_experimental_results(results, seeder)
     
     # Save results if requested
     if save_results:
@@ -413,7 +482,7 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
     # Close database tracker if used
     if tracker:
         tracker.close()
-        console.print(f"[green]💾 Database saved with complete audit trail[/green]")
+        console.print(f"[green]💾 Database saved with complete audit trail including deterministic seeds[/green]")
 
 
 @main.command() 
@@ -421,7 +490,9 @@ def experiment(models: tuple, memory: tuple, prompts: tuple, visibility: tuple,
 @click.option('--scenario', '-s', default='classic', help='Demand scenario')
 @click.option('--rounds', '-r', default=20, help='Number of rounds')
 @click.option('--runs', default=3, help='Number of runs per condition')
-def visibility_study(model: str, scenario: str, rounds: int, runs: int):
+@click.option('--base-seed', default=DEFAULT_BASE_SEED, help=f'Base seed for deterministic generation (default: {DEFAULT_BASE_SEED})')
+@click.option('--deterministic/--fixed', default=True, help='Use deterministic seeding (default) vs fixed seed')
+def visibility_study(model: str, scenario: str, rounds: int, runs: int, base_seed: int, deterministic: bool):
     """Compare all visibility levels systematically using canonical settings"""
     
     if not test_ollama_connection():
@@ -429,10 +500,15 @@ def visibility_study(model: str, scenario: str, rounds: int, runs: int):
         return
     
     console.print(f"[blue]🎯 Using canonical settings: temp={CANONICAL_TEMPERATURE}, top_p={CANONICAL_TOP_P}[/blue]")
+    seeding_method = "deterministic" if deterministic else "fixed"
+    console.print(f"[blue]🎲 Seeding method: {seeding_method} (base_seed={base_seed})[/blue]")
     
     visibility_levels = ['local', 'adjacent', 'full']
     demand_pattern = DEMAND_PATTERNS.get(scenario, DEMAND_PATTERNS['classic'])[:rounds]
     results = {}
+    
+    # Initialize seeder
+    seeder = ExperimentSeeder(base_seed=base_seed, deterministic=deterministic)
     
     console.print(f"[blue]👁️  Visibility Study - Model: {model}, Scenario: {scenario}[/blue]")
     console.print(f"[blue]📊 Testing {len(visibility_levels)} visibility levels × {runs} runs = {len(visibility_levels) * runs} games[/blue]")
@@ -450,13 +526,28 @@ def visibility_study(model: str, scenario: str, rounds: int, runs: int):
             
             for run in range(runs):
                 try:
+                    # Generate seed for this specific condition
+                    if deterministic:
+                        seed = seeder.get_seed(
+                            model=model,
+                            memory="short",  # Default memory for visibility study
+                            prompt="specific",  # Default prompt
+                            visibility=visibility,
+                            scenario=scenario,
+                            mode="modern",  # Default mode
+                            run=run + 1
+                        )
+                    else:
+                        seed = base_seed
+                    
                     # Create agents with canonical settings
                     agents = create_ollama_agents(
                         model_name=model,
                         temperature=CANONICAL_TEMPERATURE,
                         top_p=CANONICAL_TOP_P,
                         top_k=CANONICAL_TOP_K,
-                        repeat_penalty=CANONICAL_REPEAT_PENALTY
+                        repeat_penalty=CANONICAL_REPEAT_PENALTY,
+                        seed=seed
                     )
                     
                     # Create game with visibility level
@@ -474,7 +565,7 @@ def visibility_study(model: str, scenario: str, rounds: int, runs: int):
                     game_results = game.get_results()
                     visibility_results.append(game_results.summary())
                     
-                    console.print(f"  Run {run+1}: Cost=${game_results.total_cost:.2f}, Service={game_results.service_level:.1%}")
+                    console.print(f"  Run {run+1}: Cost=${game_results.total_cost:.2f}, Service={game_results.service_level:.1%} (seed={seed})")
                     
                 except Exception as e:
                     console.print(f"[red]❌ Failed run {run+1} for {visibility}: {e}[/red]")
@@ -526,10 +617,10 @@ def display_results(results, history=None):
     console.print(cost_table)
 
 
-def display_experimental_results(results):
-    """Display experimental results summary"""
+def display_experimental_results(results, seeder=None):
+    """Display experimental results summary with seeding information"""
     
-    console.print("\n[bold blue]🧪 Canonical Benchmark Results Summary[/bold blue]")
+    console.print("\n[bold blue]🧪 Deterministic Benchmark Results Summary[/bold blue]")
     
     if not results:
         console.print("[red]No results to display[/red]")
@@ -549,9 +640,16 @@ def display_experimental_results(results):
         unique_memory = len(set(r['memory'] for r in results))  
         unique_visibility = len(set(r['visibility'] for r in results))
         unique_game_modes = len(set(r['game_mode'] for r in results))
+        unique_seeds = len(set(r['seed'] for r in results))
         
         console.print(f"🎯 Tested: {unique_models} models, {unique_memory} memory strategies, {unique_visibility} visibility levels, {unique_game_modes} game modes")
         console.print(f"🎛️ All experiments used canonical settings: temp={CANONICAL_TEMPERATURE}, top_p={CANONICAL_TOP_P}")
+        console.print(f"🎲 Deterministic seeding: {unique_seeds} unique seeds generated")
+        
+        # Show seeder statistics if available
+        if seeder:
+            stats = seeder.get_seed_statistics()
+            console.print(f"🔄 Seed collision rate: {stats.get('collision_rate', 0):.1%} (lower is better)")
 
 
 def display_visibility_comparison(results):
@@ -653,7 +751,9 @@ def save_experimental_results(results, filename):
 # Add the remaining CLI commands from the original (test-model, list-models, etc.)
 @main.command()
 @click.option('--model', '-m', default='llama3.2', help='Ollama model name')
-def test_model(model: str):
+@click.option('--base-seed', default=DEFAULT_BASE_SEED, help=f'Base seed for deterministic generation (default: {DEFAULT_BASE_SEED})')
+@click.option('--deterministic/--fixed', default=True, help='Use deterministic seeding (default) vs fixed seed')
+def test_model(model: str, base_seed: int, deterministic: bool):
     """Test a model with canonical settings"""
     
     if not test_ollama_connection():
@@ -661,9 +761,17 @@ def test_model(model: str):
         return
     
     console.print(f"[blue]🧪 Testing model: {model} with canonical settings[/blue]")
-    console.print(f"[blue]🎯 Settings: temp={CANONICAL_TEMPERATURE}, top_p={CANONICAL_TOP_P}[/blue]")
+    seeding_method = "deterministic" if deterministic else "fixed" 
+    console.print(f"[blue]🎯 Settings: temp={CANONICAL_TEMPERATURE}, top_p={CANONICAL_TOP_P}, seeding={seeding_method}[/blue]")
     
     try:
+        # Generate seed for test
+        if deterministic:
+            seeder = ExperimentSeeder(base_seed=base_seed, deterministic=True)
+            seed = seeder.get_seed("test", "short", "specific", "local", "classic", "modern", 1)
+        else:
+            seed = base_seed
+            
         # Create single agent for testing with canonical settings
         agent = OllamaAgent(
             Position.RETAILER, 
@@ -671,7 +779,8 @@ def test_model(model: str):
             temperature=CANONICAL_TEMPERATURE,
             top_p=CANONICAL_TOP_P,
             top_k=CANONICAL_TOP_K,
-            repeat_penalty=CANONICAL_REPEAT_PENALTY
+            repeat_penalty=CANONICAL_REPEAT_PENALTY,
+            seed=seed
         )
         
         # Test with sample game state
@@ -690,7 +799,7 @@ def test_model(model: str):
         console.print("[yellow]Sending test scenario to model...[/yellow]")
         decision = agent.make_decision(test_state)
         
-        console.print(f"[green]✅ Model responded with order: {decision}[/green]")
+        console.print(f"[green]✅ Model responded with order: {decision} (seed={seed})[/green]")
         console.print(f"Test state: Inventory={test_state['inventory']}, Backlog={test_state['backlog']}, Demand={test_state['customer_demand']}")
         
     except Exception as e:
