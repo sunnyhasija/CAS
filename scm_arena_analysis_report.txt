@@ -1,0 +1,50 @@
+SCM-ARENA FULL FACTORIAL ANALYSIS REPORT
+==================================================
+
+Total Experiments Analyzed: 1648
+Data Collection Date: 2025-06-23 23:17
+
+OVERALL PERFORMANCE METRICS:
+------------------------------
+total_cost: 14342.24 ± 2748.38
+service_level: 0.72 ± 0.06
+bullwhip_ratio: 2.26 ± 6.88
+
+
+FACTOR IMPACTS ON TOTAL COST:
+------------------------------
+
+game_mode:
+  Best: classic ($14005)
+  Worst: modern ($14677)
+  Difference: $672
+
+memory_strategy:
+  Best: short ($13741)
+  Worst: full ($14711)
+  Difference: $970
+
+visibility_level:
+  Best: full ($13680)
+  Worst: adjacent ($15199)
+  Difference: $1519
+
+prompt_type:
+  Best: neutral ($13513)
+  Worst: specific ($15140)
+  Difference: $1626
+
+scenario:
+  Best: seasonal ($12699)
+  Worst: classic ($15426)
+  Difference: $2727
+
+
+DETAILED ANALYSIS:
+------------------------------
+See generated plots for visual analysis:
+- main_effects_*.png: Factor impact visualizations
+- interaction_effects.png: Two-way interactions
+- performance_heatmap.png: Performance across conditions
+- learning_curves.png: Within-game learning patterns
+- best_configurations.csv: Top performing settings

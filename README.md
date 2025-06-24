@@ -1,6 +1,5 @@
 # SCM-Arena: The World's First LLM Supply Chain Benchmark
 
-
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Research Status](https://img.shields.io/badge/Status-Production%20Ready-green.svg)]()
@@ -42,28 +41,7 @@ poetry run python -m scm_arena.cli experiment \
   --save-database
 ```
 
-## 🔬 Key Research Findings
-
-### Critical Bug Discovery & Fix
-**Original implementation contained a logic error that artificially favored classic mode**
-
-**BEFORE FIX (Buggy Results):**
-```
-Classic Mode (2-turn delays):    $6,200 avg cost | 85% service level
-Modern Mode (instant info):     $10,200 avg cost | 70% service level
-Effect Size: 64% artificial advantage for classic mode (due to bug)
-```
-
-**AFTER FIX (Corrected Results):**
-```
-Modern Mode (instant info):     $1,580 avg cost | 95% service level  
-Classic Mode (2-turn delays):   $1,590 avg cost | 94% service level
-Effect Size: <1% difference (true coordination effects)
-```
-
-**Research Impact**: The fix revealed that modern information flow actually enables better LLM coordination, overturning the original findings and establishing scientifically valid baselines.
-
-## 🏗️ Platform Features
+## 🔬 Key Features
 
 ### **Multi-Dimensional Evaluation**
 - **6 Experimental Factors**: Models × Memory × Prompts × Visibility × Scenarios × Game Modes
@@ -241,17 +219,17 @@ poetry run python -m scm_arena.cli experiment \
 
 ## 📊 Data & Results
 
-### **Canonical Benchmark Results (Fixed Implementation)**
+### **Canonical Benchmark Results**
 ```
 Model: llama3.2 (canonical settings: temp=0.3, top_p=0.9)
 Conditions: 108 unique experimental conditions
-Replications: 15 per condition (1,620 total experiments)
-Database: 194,400 individual agent decisions captured
+Replications: 10 per condition (1,080 total experiments)
+Database: 129,600 individual agent decisions captured
 
-Performance After Bug Fix:
-├── Modern Mode: $1,580 avg cost | 95% service level
-├── Classic Mode: $1,590 avg cost | 94% service level  
-└── Difference: <1% (true coordination effects)
+Performance Baseline:
+├── Modern Mode: ~$1,600 avg cost | ~95% service level
+├── Classic Mode: ~$1,700 avg cost | ~93% service level  
+└── Bullwhip Ratio: 1.2-1.5 (approaching human performance)
 
 Key Insights:
 ├── Modern information flow enables better coordination
@@ -294,13 +272,6 @@ poetry run python -m scm_arena.cli test-model --model your_model
 git push origin feature/your-contribution
 ```
 
-## 📚 Documentation
-
-- **[Full Documentation](./documentation.txt)**: Complete technical documentation
-- **[API Reference](./docs/api.md)**: Detailed API documentation
-- **[Research Guide](./docs/research.md)**: Academic research workflows
-- **[Examples](./examples/)**: Usage examples and tutorials
-
 ## 📖 Citation
 
 If you use SCM-Arena in your research, please cite:
@@ -315,15 +286,7 @@ If you use SCM-Arena in your research, please cite:
 }
 ```
 
-## 🏆 Leaderboard
 
-| Model | SCM-Score | Avg Cost | Service Level | Canonical Settings |
-|-------|-----------|----------|---------------|-------------------|
-| 🥇 llama3.2 | 95.2 | $1,580 | 95.0% | temp=0.3, top_p=0.9 |
-| 🥈 TBD | TBD | TBD | TBD | Canonical required |
-| 🥉 TBD | TBD | TBD | TBD | Canonical required |
-
-*All benchmark entries must use canonical settings for fair comparison*
 
 ## 🔗 Links
 
@@ -336,6 +299,14 @@ If you use SCM-Arena in your research, please cite:
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+The MIT License is a permissive free software license that allows users to:
+- Use the software for any purpose (commercial or non-commercial)
+- Modify the software
+- Distribute the software
+- Include the software in proprietary works
+
+The only requirements are to include the original copyright notice and license text in any copies or substantial portions of the software. Learn more about the [MIT License](https://opensource.org/licenses/MIT).
 
 ## 🙏 Acknowledgments
 

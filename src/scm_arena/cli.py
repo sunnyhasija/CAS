@@ -1,10 +1,13 @@
 """
-Enhanced command-line interface for SCM-Arena with fixed deterministic seeding.
+Enhanced command-line interface for SCM-Arena with complete baseline integration.
 
 FEATURES:
 - Deterministic and non-deterministic seeding modes
 - Full factorial experimental designs
 - Canonical LLM settings for reproducibility
+- Complete baseline agents comparison (Sterman, Newsvendor, Base-stock, etc.)
+- Full factorial baseline study matching LLM experimental structure
+- Database merging capabilities
 - Comprehensive error handling and validation
 """
 
@@ -25,6 +28,11 @@ from .evaluation.scenarios import DEMAND_PATTERNS
 
 # FIXED: Import the seeding system
 from .utils.seeding import ExperimentSeeder, get_seed_for_condition, DEFAULT_BASE_SEED
+
+# Import baseline agents
+from .beer_game.baseline_agents import (
+    create_baseline_agent, create_baseline_agents_set, get_baseline_descriptions
+)
 
 # Import visualization with try/except in case it's not available
 try:
@@ -94,13 +102,13 @@ def run(model: str, scenario: str, rounds: int, verbose: bool, classic_mode: boo
     
     seed = seeder.get_seed(
         model=model,
-        memory=mem,
-        prompt_type=prompt_type,  # Use keyword arguments to be explicit
-        visibility=vis,
+        memory=memory,
+        prompt_type=prompt_type,
+        visibility=visibility,
         scenario=scenario,
         game_mode=game_mode,
-        run_number=run + 1
-        )
+        run_number=run_number
+    )
     
     console.print(f"[green]✅ Connected to Ollama server[/green]")
     console.print(f"[blue]🎯 Using canonical settings: temp={CANONICAL_TEMPERATURE}, top_p={CANONICAL_TOP_P}[/blue]")
@@ -201,6 +209,697 @@ def run(model: str, scenario: str, rounds: int, verbose: bool, classic_mode: boo
             console.print(f"[red]❌ Failed to save analysis: {e}[/red]")
     elif save_analysis and not create_game_summary_report:
         console.print("[yellow]⚠️ Analysis report generation not available[/yellow]")
+
+
+@main.command()
+@click.option('--baseline-agents', '-b', multiple=True, 
+              default=['sterman', 'newsvendor', 'basestock', 'reactive'],
+              type=click.Choice(['sterman', 'newsvendor', 'basestock', 'reactive', 'movingavg']),
+              help='Baseline agents to test')
+@click.option('--scenarios', multiple=True, default=['classic', 'random'],
+              type=click.Choice(['classic', 'random', 'shock', 'seasonal']),
+              help='Scenarios to test')
+@click.option('--game-modes', multiple=True, default=['modern'],
+              type=click.Choice(['modern', 'classic']),
+              help='Game modes to test')
+@click.option('--runs', default=5, help='Runs per condition')
+@click.option('--rounds', default=30, help='Rounds per game')
+@click.option('--save-results', help='Save results to CSV file')
+@click.option('--save-database', is_flag=True, help='Save to database')
+@click.option('--db-path', default='baseline_study.db', help='Database path')
+def baseline_study(baseline_agents: tuple, scenarios: tuple, game_modes: tuple,
+                   runs: int, rounds: int, save_results: str, 
+                   save_database: bool, db_path: str):
+    """
+    Pure baseline agents study across scenarios and game modes.
+    
+    Tests classical algorithms (no LLM) to establish performance benchmarks.
+    Perfect for understanding algorithmic baselines before LLM comparison.
+    """
+    
+    console.print(Panel(
+        f"""[bold blue]🔬 Pure Baseline Agents Study[/bold blue]
+
+📊 Experimental Design:
+• Baseline Agents: {len(baseline_agents)} ({', '.join(baseline_agents)})
+• Scenarios: {len(scenarios)} ({', '.join(scenarios)})
+• Game Modes: {len(game_modes)} ({', '.join(game_modes)})
+• Runs per Condition: {runs}
+• Rounds per Game: {rounds}
+
+🎯 Total Experiments: {len(baseline_agents) * len(scenarios) * len(game_modes) * runs}
+⏱️  Estimated Time: {len(baseline_agents) * len(scenarios) * len(game_modes) * runs * 0.5:.1f} minutes
+
+This establishes algorithmic baselines across experimental conditions.""",
+        title="Baseline Study Configuration"
+    ))
+    
+    if not click.confirm("Proceed with baseline study?"):
+        return
+    
+    # Initialize data capture
+    tracker = None
+    if save_database and ExperimentTracker:
+        tracker = ExperimentTracker(db_path)
+        console.print(f"[green]📊 Database tracking enabled: {db_path}[/green]")
+    
+    results = []
+    total_experiments = len(baseline_agents) * len(scenarios) * len(game_modes) * runs
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console
+    ) as progress:
+        
+        task = progress.add_task("Running baseline study...", total=total_experiments)
+        
+        for scenario in scenarios:
+            for game_mode in game_modes:
+                for agent_type in baseline_agents:
+                    
+                    console.print(f"\n[yellow]Testing {agent_type} in {scenario}-{game_mode}...[/yellow]")
+                    
+                    for run in range(runs):
+                        try:
+                            # Create baseline agents for all positions
+                            agents = {
+                                position: create_baseline_agent(agent_type, position)
+                                for position in Position
+                            }
+                            
+                            # Get demand pattern
+                            demand_pattern = DEMAND_PATTERNS.get(scenario, DEMAND_PATTERNS['classic'])[:rounds]
+                            
+                            # Create game
+                            classic_mode = (game_mode == 'classic')
+                            if classic_mode:
+                                game = create_classic_beer_game(agents, demand_pattern)
+                            else:
+                                game = BeerGame(agents, demand_pattern)
+                            
+                            # Start database tracking if enabled
+                            if tracker:
+                                experiment_id = tracker.start_experiment(
+                                    model_name=agent_type,
+                                    memory_strategy="baseline",
+                                    memory_window=None,
+                                    prompt_type="baseline",
+                                    visibility_level="local",
+                                    scenario=scenario,
+                                    game_mode=game_mode,
+                                    rounds=rounds,
+                                    run_number=run + 1,
+                                    temperature=0.0,  # Not applicable
+                                    top_p=0.0,
+                                    top_k=0,
+                                    repeat_penalty=0.0,
+                                    seed=0,
+                                    base_seed=0,
+                                    deterministic_seeding=False
+                                )
+                            
+                            # Run game
+                            round_number = 0
+                            while not game.is_complete():
+                                round_number += 1
+                                state = game.step()
+                                
+                                # Capture round data if tracking enabled
+                                if tracker:
+                                    agent_interactions = []
+                                    for position, player in state.players.items():
+                                        agent_interactions.append({
+                                            'position': position.value,
+                                            'inventory': player.inventory,
+                                            'backlog': player.backlog,
+                                            'incoming_order': player.incoming_order,
+                                            'outgoing_order': player.outgoing_order,
+                                            'round_cost': player.period_cost,
+                                            'total_cost': player.total_cost,
+                                            'prompt': '',
+                                            'response': f'{agent_type}_decision',
+                                            'decision': player.outgoing_order,
+                                            'response_time_ms': 0.0
+                                        })
+                                    
+                                    game_state_json = json.dumps({
+                                        "round": state.round,
+                                        "customer_demand": state.customer_demand,
+                                        "total_cost": state.total_cost,
+                                        "agent_type": agent_type,
+                                        "players": {pos.value: {
+                                            "inventory": player.inventory,
+                                            "backlog": player.backlog,
+                                            "incoming_order": player.incoming_order,
+                                            "outgoing_order": player.outgoing_order,
+                                            "period_cost": player.period_cost,
+                                            "total_cost": player.total_cost
+                                        } for pos, player in state.players.items()}
+                                    })
+                                    
+                                    tracker.track_round(
+                                        round_number=state.round,
+                                        customer_demand=state.customer_demand,
+                                        total_system_cost=state.total_cost,
+                                        total_system_inventory=sum(p.inventory for p in state.players.values()),
+                                        total_system_backlog=sum(p.backlog for p in state.players.values()),
+                                        agent_interactions=agent_interactions,
+                                        game_state_json=game_state_json
+                                    )
+                            
+                            # Get results
+                            game_results = game.get_results()
+                            summary = game_results.summary()
+                            
+                            # Finish database tracking if enabled
+                            if tracker:
+                                tracker.finish_experiment(
+                                    total_cost=summary['total_cost'],
+                                    service_level=summary['service_level'],
+                                    bullwhip_ratio=summary['bullwhip_ratio']
+                                )
+                            
+                            # Store result
+                            result = {
+                                'agent_type': agent_type,
+                                'scenario': scenario,
+                                'game_mode': game_mode,
+                                'run': run + 1,
+                                'rounds': rounds,
+                                **summary
+                            }
+                            
+                            results.append(result)
+                            
+                            console.print(f"  Run {run+1}: Cost=${summary['total_cost']:.0f}, Service={summary['service_level']:.1%}")
+                            
+                        except Exception as e:
+                            console.print(f"[red]❌ Failed: {agent_type}-{scenario}-{game_mode} Run {run+1}: {e}[/red]")
+                        
+                        progress.update(task, advance=1)
+    
+    # Display results
+    display_baseline_study_results(results)
+    
+    # Save results if requested
+    if save_results:
+        save_experimental_results(results, save_results)
+    
+    # Close database tracker if used
+    if tracker:
+        tracker.close()
+        console.print(f"[green]💾 Baseline study saved to database[/green]")
+
+
+@main.command()
+@click.option('--baseline-agents', '-b', multiple=True, 
+              default=['sterman', 'newsvendor', 'basestock', 'reactive', 'movingavg'],
+              type=click.Choice(['sterman', 'newsvendor', 'basestock', 'reactive', 'movingavg']),
+              help='Baseline agents to test')
+@click.option('--memory', multiple=True, default=['none', 'short', 'full'], 
+              type=click.Choice(['none', 'short', 'medium', 'full']), 
+              help='Memory strategies (for consistency with LLM study)')
+@click.option('--prompts', multiple=True, default=['specific', 'neutral'], 
+              type=click.Choice(['specific', 'neutral']), 
+              help='Prompt types (for consistency with LLM study)')
+@click.option('--visibility', multiple=True, default=['local', 'adjacent', 'full'], 
+              type=click.Choice(['local', 'adjacent', 'full']), 
+              help='Visibility levels (for consistency with LLM study)')
+@click.option('--scenarios', multiple=True, default=['classic', 'random', 'shock'], 
+              type=click.Choice(['classic', 'random', 'shock', 'seasonal']), 
+              help='Scenarios to test')
+@click.option('--game-modes', multiple=True, default=['modern', 'classic'], 
+              type=click.Choice(['modern', 'classic']), 
+              help='Game modes to test')
+@click.option('--runs', default=20, help='Number of runs per condition (default: 20)')
+@click.option('--rounds', default=52, help='Number of rounds per game (default: 52)')
+@click.option('--db-path', default='baseline_full_factorial.db', help='Database file path')
+@click.option('--save-results', help='Optional CSV export file')
+def full_factorial_baseline(baseline_agents: tuple, memory: tuple, prompts: tuple, 
+                           visibility: tuple, scenarios: tuple, game_modes: tuple,
+                           runs: int, rounds: int, db_path: str, save_results: str):
+    """
+    Run full factorial baseline study to match LLM experimental design.
+    
+    Runs baseline agents across all experimental dimensions with same structure
+    as LLM study for direct comparison and database merging.
+    
+    NOTE: Baseline agents ignore memory/prompt variations but data is structured
+    consistently for analysis and merging with LLM results.
+    """
+    
+    # Calculate total experiment scope
+    total_conditions = len(baseline_agents) * len(memory) * len(prompts) * len(visibility) * len(scenarios) * len(game_modes)
+    total_experiments = total_conditions * runs
+    
+    console.print(Panel(
+        f"""[bold blue]🧪 Full Factorial Baseline Study[/bold blue]
+
+📊 Experimental Design (matching LLM study structure):
+• Baseline Agents: {len(baseline_agents)} ({', '.join(baseline_agents)})
+• Memory Strategies: {len(memory)} ({', '.join(memory)}) [metadata only]
+• Prompt Types: {len(prompts)} ({', '.join(prompts)}) [metadata only]  
+• Visibility Levels: {len(visibility)} ({', '.join(visibility)}) [metadata only]
+• Scenarios: {len(scenarios)} ({', '.join(scenarios)})
+• Game Modes: {len(game_modes)} ({', '.join(game_modes)})
+
+🎯 Experimental Scope:
+• Conditions per Agent: {len(memory) * len(prompts) * len(visibility) * len(scenarios) * len(game_modes)}
+• Total Agent Types: {len(baseline_agents)}
+• Runs per Condition: {runs}
+• Rounds per Game: {rounds}
+• Total Experiments: {total_experiments}
+
+⏱️  Estimated Time: {total_experiments * 0.5:.0f}-{total_experiments * 1:.0f} minutes
+
+💾 Database: {db_path}
+🔄 Structure matches LLM study for easy merging
+📈 Ready for direct baseline vs LLM comparison""",
+        title="Full Factorial Baseline Configuration"
+    ))
+    
+    console.print(f"\n[yellow]⚠️  Note: Baseline agents don't use memory/prompts but data structure matches LLM study[/yellow]")
+    
+    if not click.confirm("Proceed with full factorial baseline study?"):
+        return
+    
+    # Initialize database tracking
+    if not ExperimentTracker:
+        console.print("[red]❌ Database tracking not available[/red]")
+        return
+    
+    tracker = ExperimentTracker(db_path)
+    console.print(f"[green]📊 Database tracking enabled: {db_path}[/green]")
+    
+    # Memory window mapping (for metadata consistency)
+    memory_windows = {'none': 0, 'short': 5, 'medium': 10, 'full': None}
+    
+    results = []
+    experiment_count = 0
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console
+    ) as progress:
+        
+        task = progress.add_task("Running full factorial baseline study...", total=total_experiments)
+        
+        # Generate all experimental conditions
+        conditions = itertools.product(
+            baseline_agents, memory, prompts, visibility, scenarios, game_modes
+        )
+        
+        for condition in conditions:
+            agent_type, mem, prompt_type, vis, scenario, game_mode = condition
+            
+            console.print(f"\n[yellow]Testing {agent_type}: {mem}-{prompt_type}-{vis}-{scenario}-{game_mode}...[/yellow]")
+            
+            for run in range(runs):
+                experiment_count += 1
+                
+                try:
+                    # Set up experimental parameters
+                    memory_window = memory_windows[mem]
+                    classic_mode = (game_mode == 'classic')
+                    
+                    # Start database tracking with full metadata for consistency
+                    experiment_id = tracker.start_experiment(
+                        model_name=agent_type,  # Use agent type as "model"
+                        memory_strategy=mem,    # Store for consistency (though not used)
+                        memory_window=memory_window,
+                        prompt_type=prompt_type,  # Store for consistency (though not used)
+                        visibility_level=vis,    # Store for consistency (though not used)
+                        scenario=scenario,
+                        game_mode=game_mode,
+                        rounds=rounds,
+                        run_number=run + 1,
+                        temperature=0.0,  # Not applicable for baseline agents
+                        top_p=0.0,
+                        top_k=0,
+                        repeat_penalty=0.0,
+                        seed=experiment_count,  # Use experiment count as seed for uniqueness
+                        base_seed=42,
+                        deterministic_seeding=False  # Not applicable for baseline agents
+                    )
+                    
+                    # Create baseline agents for all positions
+                    agents = {
+                        position: create_baseline_agent(agent_type, position)
+                        for position in Position
+                    }
+                    
+                    # Get demand pattern
+                    demand_pattern = DEMAND_PATTERNS.get(scenario, DEMAND_PATTERNS['classic'])[:rounds]
+                    
+                    # Create game
+                    if classic_mode:
+                        game = create_classic_beer_game(agents, demand_pattern)
+                        # NOTE: Baseline agents ignore visibility, but we store it for metadata
+                    else:
+                        game = BeerGame(agents, demand_pattern)
+                        # NOTE: Baseline agents ignore visibility, but we store it for metadata
+                    
+                    # Run game with data capture
+                    round_number = 0
+                    while not game.is_complete():
+                        round_number += 1
+                        state = game.step()
+                        
+                        # Capture round data
+                        agent_interactions = []
+                        for position, player in state.players.items():
+                            agent_interactions.append({
+                                'position': position.value,
+                                'inventory': player.inventory,
+                                'backlog': player.backlog,
+                                'incoming_order': player.incoming_order,
+                                'outgoing_order': player.outgoing_order,
+                                'round_cost': player.period_cost,
+                                'total_cost': player.total_cost,
+                                'prompt': f'{agent_type}_baseline',  # Baseline identifier
+                                'response': f'{agent_type}_decision',
+                                'decision': player.outgoing_order,
+                                'response_time_ms': 0.0
+                            })
+                        
+                        # Create game state JSON with baseline metadata
+                        game_state_json = json.dumps({
+                            "round": state.round,
+                            "customer_demand": state.customer_demand,
+                            "total_cost": state.total_cost,
+                            "agent_type": agent_type,
+                            "baseline_agent": True,
+                            "memory_strategy": mem,  # Metadata only
+                            "prompt_type": prompt_type,  # Metadata only  
+                            "visibility_level": vis,  # Metadata only
+                            "players": {pos.value: {
+                                "inventory": player.inventory,
+                                "backlog": player.backlog,
+                                "incoming_order": player.incoming_order,
+                                "outgoing_order": player.outgoing_order,
+                                "period_cost": player.period_cost,
+                                "total_cost": player.total_cost
+                            } for pos, player in state.players.items()}
+                        })
+                        
+                        # Track the round
+                        tracker.track_round(
+                            round_number=state.round,
+                            customer_demand=state.customer_demand,
+                            total_system_cost=state.total_cost,
+                            total_system_inventory=sum(p.inventory for p in state.players.values()),
+                            total_system_backlog=sum(p.backlog for p in state.players.values()),
+                            agent_interactions=agent_interactions,
+                            game_state_json=game_state_json
+                        )
+                    
+                    # Get results
+                    game_results = game.get_results()
+                    summary = game_results.summary()
+                    
+                    # Finish database tracking
+                    tracker.finish_experiment(
+                        total_cost=summary['total_cost'],
+                        service_level=summary['service_level'],
+                        bullwhip_ratio=summary['bullwhip_ratio']
+                    )
+                    
+                    # Store result for optional CSV export
+                    result = {
+                        'agent_type': agent_type,
+                        'model_name': agent_type,  # For consistency with LLM data
+                        'memory_strategy': mem,
+                        'memory_window': memory_window,
+                        'prompt_type': prompt_type,
+                        'visibility_level': vis,
+                        'scenario': scenario,
+                        'game_mode': game_mode,
+                        'run': run + 1,
+                        'rounds': rounds,
+                        'experiment_id': experiment_id,
+                        'baseline_agent': True,
+                        **summary
+                    }
+                    
+                    results.append(result)
+                    
+                    # Progress update
+                    console.print(f"  Run {run+1}: Cost=${summary['total_cost']:.0f}, Service={summary['service_level']:.1%}")
+                    
+                except Exception as e:
+                    console.print(f"[red]❌ Failed: {agent_type}-{mem}-{prompt_type}-{vis}-{scenario}-{game_mode} Run {run+1}: {e}[/red]")
+                
+                progress.update(task, advance=1)
+    
+    # Display completion summary
+    console.print(f"\n[bold green]🎉 Full Factorial Baseline Study Complete![/bold green]")
+    console.print(f"✅ Total experiments: {len(results)}")
+    console.print(f"💾 Database: {db_path}")
+    
+    # Quick performance summary
+    if results:
+        agent_performance = {}
+        for result in results:
+            agent = result['agent_type']
+            if agent not in agent_performance:
+                agent_performance[agent] = []
+            agent_performance[agent].append(result['total_cost'])
+        
+        console.print(f"\n📊 Quick Performance Summary:")
+        for agent, costs in sorted(agent_performance.items(), key=lambda x: sum(x[1])/len(x[1])):
+            avg_cost = sum(costs) / len(costs)
+            console.print(f"  {agent}: ${avg_cost:.0f} avg cost ({len(costs)} experiments)")
+    
+    # Save CSV if requested
+    if save_results:
+        save_experimental_results(results, save_results)
+    
+    # Close database
+    tracker.close()
+    console.print(f"[green]💾 Full factorial baseline study saved to {db_path}[/green]")
+    
+    # Database merging instructions
+    console.print(f"\n[blue]🔗 To merge with LLM database:[/blue]")
+    console.print(f"[cyan]poetry run python -m scm_arena.cli merge-databases \\[/cyan]")
+    console.print(f"[cyan]  --llm-db scm_arena_experiments.db \\[/cyan]")
+    console.print(f"[cyan]  --baseline-db {db_path} \\[/cyan]")
+    console.print(f"[cyan]  --output-db combined_study.db[/cyan]")
+
+
+@main.command()
+@click.option('--llm-model', '-m', default='llama3.2', help='LLM model for comparison')
+@click.option('--baseline-agents', '-b', multiple=True, 
+              default=['sterman', 'newsvendor'],
+              type=click.Choice(['sterman', 'newsvendor', 'basestock', 'reactive', 'movingavg']),
+              help='Baseline agents to include in comparison')
+@click.option('--memory', multiple=True, default=['short'], 
+              type=click.Choice(['none', 'short', 'medium', 'full']), 
+              help='Memory strategies to test (LLM only)')
+@click.option('--visibility', multiple=True, default=['local'], 
+              type=click.Choice(['local', 'adjacent', 'full']), 
+              help='Visibility levels to test (LLM only)')
+@click.option('--scenarios', multiple=True, default=['classic', 'random'], 
+              type=click.Choice(['classic', 'random', 'shock', 'seasonal']), 
+              help='Scenarios to test')
+@click.option('--game-modes', multiple=True, default=['modern'], 
+              type=click.Choice(['modern', 'classic']), 
+              help='Game modes to test')
+@click.option('--runs', default=5, help='Number of runs per condition')
+@click.option('--rounds', default=30, help='Number of rounds')
+@click.option('--save-results', help='Save results to CSV file')
+@click.option('--save-database', is_flag=True, help='Save to database')
+@click.option('--db-path', default='llm_vs_baseline.db', help='Database path')
+def llm_vs_baseline(llm_model: str, baseline_agents: tuple, memory: tuple, 
+                    visibility: tuple, scenarios: tuple, game_modes: tuple,
+                    runs: int, rounds: int, save_results: str, 
+                    save_database: bool, db_path: str):
+    """
+    Compare LLM against baseline agents across experimental conditions.
+    
+    This is the core comparison for Paper 2: "LLM vs Classical Algorithms"
+    Tests LLM across all memory/visibility combinations vs baseline agents
+    in standard conditions.
+    """
+    
+    if not test_ollama_connection():
+        console.print("[red]❌ Cannot connect to Ollama server[/red]")
+        return
+    
+    # Calculate experiment scope
+    llm_conditions = len(memory) * len(visibility) * len(scenarios) * len(game_modes)
+    baseline_conditions = len(scenarios) * len(game_modes)  # Baselines don't vary by memory/visibility
+    total_experiments = (llm_conditions + len(baseline_agents) * baseline_conditions) * runs
+    
+    console.print(Panel(
+        f"""[bold blue]🥊 LLM vs Baseline Agents Comparison[/bold blue]
+
+📊 Experimental Design:
+• LLM Model: {llm_model}
+• Baseline Agents: {len(baseline_agents)} ({', '.join(baseline_agents)})
+• LLM Conditions: {llm_conditions} (memory × visibility × scenarios × modes)
+• Baseline Conditions: {baseline_conditions} per agent (scenarios × modes)
+• Runs per Condition: {runs}
+
+🎯 Total Experiments: {total_experiments}
+⏱️  Estimated Time: {total_experiments * 2:.0f}-{total_experiments * 4:.0f} minutes
+
+🎛️ LLM uses canonical settings: temp={CANONICAL_TEMPERATURE}, top_p={CANONICAL_TOP_P}
+📈 This tests LLM advantages across information architectures!""",
+        title="LLM vs Baseline Study"
+    ))
+    
+    if not click.confirm("Proceed with LLM vs baseline comparison?"):
+        return
+    
+    # Initialize data capture
+    tracker = None
+    if save_database and ExperimentTracker:
+        tracker = ExperimentTracker(db_path)
+        console.print(f"[green]📊 Database tracking enabled: {db_path}[/green]")
+    
+    memory_windows = {'none': 0, 'short': 5, 'medium': 10, 'full': None}
+    results = []
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console
+    ) as progress:
+        
+        task = progress.add_task("Running LLM vs baseline study...", total=total_experiments)
+        
+        # Test LLM across all conditions
+        for mem in memory:
+            for vis in visibility:
+                for scenario in scenarios:
+                    for game_mode in game_modes:
+                        
+                        console.print(f"\n[yellow]Testing LLM: {mem}-{vis}-{scenario}-{game_mode}...[/yellow]")
+                        
+                        for run in range(runs):
+                            try:
+                                # Create LLM agents
+                                memory_window = memory_windows[mem]
+                                visibility_level = VisibilityLevel(vis)
+                                classic_mode = (game_mode == 'classic')
+                                
+                                agents = create_ollama_agents(
+                                    llm_model,
+                                    memory_window=memory_window,
+                                    temperature=CANONICAL_TEMPERATURE,
+                                    top_p=CANONICAL_TOP_P,
+                                    top_k=CANONICAL_TOP_K,
+                                    repeat_penalty=CANONICAL_REPEAT_PENALTY
+                                )
+                                
+                                # Get demand pattern
+                                demand_pattern = DEMAND_PATTERNS.get(scenario, DEMAND_PATTERNS['classic'])[:rounds]
+                                
+                                # Create game
+                                if classic_mode:
+                                    game = create_classic_beer_game(agents, demand_pattern)
+                                    game.visibility_level = visibility_level
+                                else:
+                                    game = BeerGame(agents, demand_pattern, visibility_level=visibility_level)
+                                
+                                # Run game
+                                while not game.is_complete():
+                                    game.step()
+                                
+                                # Get results
+                                game_results = game.get_results()
+                                summary = game_results.summary()
+                                
+                                # Store result
+                                result = {
+                                    'agent_type': 'llm',
+                                    'model': llm_model,
+                                    'memory': mem,
+                                    'memory_window': memory_window,
+                                    'visibility': vis,
+                                    'scenario': scenario,
+                                    'game_mode': game_mode,
+                                    'run': run + 1,
+                                    'rounds': rounds,
+                                    **summary
+                                }
+                                
+                                results.append(result)
+                                console.print(f"  LLM Run {run+1}: Cost=${summary['total_cost']:.0f}")
+                                
+                            except Exception as e:
+                                console.print(f"[red]❌ LLM Failed: {mem}-{vis}-{scenario}-{game_mode} Run {run+1}: {e}[/red]")
+                            
+                            progress.update(task, advance=1)
+        
+        # Test baseline agents
+        for agent_type in baseline_agents:
+            for scenario in scenarios:
+                for game_mode in game_modes:
+                    
+                    console.print(f"\n[yellow]Testing {agent_type}: {scenario}-{game_mode}...[/yellow]")
+                    
+                    for run in range(runs):
+                        try:
+                            # Create baseline agents
+                            agents = {
+                                position: create_baseline_agent(agent_type, position)
+                                for position in Position
+                            }
+                            
+                            # Get demand pattern
+                            demand_pattern = DEMAND_PATTERNS.get(scenario, DEMAND_PATTERNS['classic'])[:rounds]
+                            
+                            # Create game
+                            classic_mode = (game_mode == 'classic')
+                            if classic_mode:
+                                game = create_classic_beer_game(agents, demand_pattern)
+                            else:
+                                game = BeerGame(agents, demand_pattern)
+                            
+                            # Run game
+                            while not game.is_complete():
+                                game.step()
+                            
+                            # Get results
+                            game_results = game.get_results()
+                            summary = game_results.summary()
+                            
+                            # Store result
+                            result = {
+                                'agent_type': agent_type,
+                                'model': 'baseline',
+                                'memory': 'baseline',
+                                'memory_window': None,
+                                'visibility': 'baseline',
+                                'scenario': scenario,
+                                'game_mode': game_mode,
+                                'run': run + 1,
+                                'rounds': rounds,
+                                **summary
+                            }
+                            
+                            results.append(result)
+                            console.print(f"  {agent_type} Run {run+1}: Cost=${summary['total_cost']:.0f}")
+                            
+                        except Exception as e:
+                            console.print(f"[red]❌ {agent_type} Failed: {scenario}-{game_mode} Run {run+1}: {e}[/red]")
+                        
+                        progress.update(task, advance=1)
+    
+    # Display comparison results
+    display_llm_vs_baseline_results(results)
+    
+    # Save results if requested
+    if save_results:
+        save_experimental_results(results, save_results)
+    
+    # Close database tracker if used
+    if tracker:
+        tracker.close()
+        console.print(f"[green]💾 LLM vs baseline comparison saved to database[/green]")
 
 
 @main.command()
@@ -654,6 +1353,191 @@ def list_models():
         console.print(f"[red]❌ Failed to list models: {e}[/red]")
 
 
+@main.command()
+def baseline_agents():
+    """List available baseline agents and their descriptions"""
+    
+    console.print("[bold blue]📋 Available Baseline Agents[/bold blue]")
+    
+    descriptions = get_baseline_descriptions()
+    
+    table = Table()
+    table.add_column("Agent", style="cyan")
+    table.add_column("Description", style="white")
+    table.add_column("Reference", style="yellow")
+    
+    table.add_row(
+        "sterman", 
+        descriptions["sterman"],
+        "Sterman (1989) Management Science"
+    )
+    table.add_row(
+        "newsvendor", 
+        descriptions["newsvendor"],
+        "Classic Operations Research"
+    )
+    table.add_row(
+        "basestock", 
+        descriptions["basestock"],
+        "Supply Chain Management Standard"
+    )
+    table.add_row(
+        "reactive", 
+        descriptions["reactive"],
+        "Simple Order-Up-To Policy"
+    )
+    table.add_row(
+        "movingavg", 
+        descriptions["movingavg"],
+        "Forecasting-Based Approach"
+    )
+    
+    console.print(table)
+    
+    console.print(f"\n[blue]💡 Usage Examples:[/blue]")
+    console.print("[cyan]# Pure baseline study[/cyan]")
+    console.print("poetry run python -m scm_arena.cli baseline-study")
+    
+    console.print("\n[cyan]# Full factorial baseline study (matches LLM structure)[/cyan]")
+    console.print("poetry run python -m scm_arena.cli full-factorial-baseline \\")
+    console.print("  --runs 20 --rounds 52")
+    
+    console.print("\n[cyan]# LLM vs baseline comparison[/cyan]")
+    console.print("poetry run python -m scm_arena.cli llm-vs-baseline \\")
+    console.print("  --baseline-agents sterman newsvendor \\")
+    console.print("  --memory short full --visibility local adjacent \\")
+    console.print("  --runs 5 --save-results comparison.csv")
+
+
+@main.command()
+@click.option('--llm-db', required=True, help='Path to LLM experiments database')
+@click.option('--baseline-db', required=True, help='Path to baseline experiments database') 
+@click.option('--output-db', required=True, help='Path to combined output database')
+def merge_databases(llm_db: str, baseline_db: str, output_db: str):
+    """
+    Merge LLM and baseline experiment databases into a combined database.
+    
+    This creates a unified database with both LLM and baseline results
+    for comprehensive analysis and comparison.
+    """
+    
+    console.print(f"[blue]🔗 Merging Databases[/blue]")
+    console.print(f"  LLM Database: {llm_db}")
+    console.print(f"  Baseline Database: {baseline_db}")
+    console.print(f"  Output Database: {output_db}")
+    
+    try:
+        import sqlite3
+        import shutil
+        
+        # Copy LLM database as base
+        shutil.copy2(llm_db, output_db)
+        console.print(f"✅ Copied LLM database as base")
+        
+        # Connect to databases
+        output_conn = sqlite3.connect(output_db)
+        baseline_conn = sqlite3.connect(baseline_db)
+        
+        # Attach baseline database
+        output_conn.execute(f"ATTACH DATABASE '{baseline_db}' AS baseline")
+        
+        # Get table names
+        tables = ['experiments', 'rounds', 'agent_rounds', 'game_states']
+        
+        # Copy data from baseline database
+        for table in tables:
+            # Check if table exists in baseline database
+            cursor = baseline_conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", 
+                (table,)
+            )
+            if cursor.fetchone():
+                # Insert baseline data into output database
+                output_conn.execute(f"INSERT INTO {table} SELECT * FROM baseline.{table}")
+                console.print(f"✅ Merged {table} table")
+        
+        # Commit and close
+        output_conn.commit()
+        output_conn.close()
+        baseline_conn.close()
+        
+        # Report final counts
+        final_conn = sqlite3.connect(output_db)
+        cursor = final_conn.execute("SELECT COUNT(*) FROM experiments")
+        total_experiments = cursor.fetchone()[0]
+        
+        cursor = final_conn.execute("SELECT COUNT(*) FROM experiments WHERE model_name IN ('sterman', 'newsvendor', 'basestock', 'reactive', 'movingavg')")
+        baseline_experiments = cursor.fetchone()[0]
+        
+        llm_experiments = total_experiments - baseline_experiments
+        
+        final_conn.close()
+        
+        console.print(f"\n[bold green]🎉 Database Merge Complete![/bold green]")
+        console.print(f"📊 Combined Database: {output_db}")
+        console.print(f"  Total Experiments: {total_experiments}")
+        console.print(f"  LLM Experiments: {llm_experiments}")
+        console.print(f"  Baseline Experiments: {baseline_experiments}")
+        console.print(f"\n[blue]Ready for comprehensive LLM vs Baseline analysis![/blue]")
+        
+    except Exception as e:
+        console.print(f"[red]❌ Database merge failed: {e}[/red]")
+        console.print(f"Make sure both input databases exist and are accessible")
+
+
+@main.command()
+@click.option('--db-path', required=True, help='Database path to inspect')
+def inspect_database(db_path: str):
+    """Inspect database contents and show summary statistics"""
+    
+    console.print(f"[blue]🔍 Inspecting Database: {db_path}[/blue]")
+    
+    try:
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        
+        # Check tables
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in cursor.fetchall()]
+        console.print(f"📊 Tables: {', '.join(tables)}")
+        
+        if 'experiments' in tables:
+            # Experiment counts
+            cursor = conn.execute("SELECT COUNT(*) FROM experiments")
+            total_experiments = cursor.fetchone()[0]
+            console.print(f"📈 Total Experiments: {total_experiments}")
+            
+            # Agent type breakdown
+            cursor = conn.execute("SELECT model_name, COUNT(*) FROM experiments GROUP BY model_name ORDER BY COUNT(*) DESC")
+            agent_counts = cursor.fetchall()
+            
+            console.print(f"\n📊 Experiments by Agent Type:")
+            for agent, count in agent_counts:
+                console.print(f"  {agent}: {count}")
+            
+            # Scenario breakdown
+            cursor = conn.execute("SELECT scenario, COUNT(*) FROM experiments GROUP BY scenario")
+            scenario_counts = cursor.fetchall()
+            
+            console.print(f"\n🎯 Experiments by Scenario:")
+            for scenario, count in scenario_counts:
+                console.print(f"  {scenario}: {count}")
+            
+            # Game mode breakdown
+            cursor = conn.execute("SELECT game_mode, COUNT(*) FROM experiments GROUP BY game_mode")
+            mode_counts = cursor.fetchall()
+            
+            console.print(f"\n🎮 Experiments by Game Mode:")
+            for mode, count in mode_counts:
+                console.print(f"  {mode}: {count}")
+        
+        conn.close()
+        console.print(f"\n✅ Database inspection complete")
+        
+    except Exception as e:
+        console.print(f"[red]❌ Database inspection failed: {e}[/red]")
+
+
 def display_results(results, history=None):
     """Display game results in a formatted table"""
     
@@ -690,6 +1574,164 @@ def display_results(results, history=None):
         )
     
     console.print(cost_table)
+
+
+def display_baseline_study_results(results):
+    """Display baseline study results"""
+    
+    console.print("\n[bold blue]🔬 Baseline Study Results[/bold blue]")
+    
+    if not results:
+        console.print("[red]No results to display[/red]")
+        return
+    
+    # Group results by agent type
+    agent_performance = {}
+    for result in results:
+        agent = result['agent_type']
+        if agent not in agent_performance:
+            agent_performance[agent] = []
+        agent_performance[agent].append(result['total_cost'])
+    
+    # Create performance table
+    table = Table(title="Baseline Agent Performance")
+    table.add_column("Agent Type", style="cyan")
+    table.add_column("Avg Cost", style="green")
+    table.add_column("Std Dev", style="yellow")
+    table.add_column("Min Cost", style="blue")
+    table.add_column("Max Cost", style="red")
+    table.add_column("Experiments", style="white")
+    
+    # Calculate statistics
+    agent_stats = []
+    for agent, costs in agent_performance.items():
+        mean_cost = sum(costs) / len(costs)
+        std_cost = (sum((c - mean_cost) ** 2 for c in costs) / len(costs)) ** 0.5
+        min_cost = min(costs)
+        max_cost = max(costs)
+        
+        agent_stats.append({
+            'agent': agent,
+            'mean': mean_cost,
+            'std': std_cost,
+            'min': min_cost,
+            'max': max_cost,
+            'count': len(costs)
+        })
+    
+    # Sort by mean cost
+    agent_stats.sort(key=lambda x: x['mean'])
+    
+    # Add to table with ranking
+    for rank, stats in enumerate(agent_stats, 1):
+        rank_emoji = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else f"{rank}"
+        
+        table.add_row(
+            f"{rank_emoji} {stats['agent']}",
+            f"${stats['mean']:.0f}",
+            f"±{stats['std']:.0f}",
+            f"${stats['min']:.0f}",
+            f"${stats['max']:.0f}",
+            str(stats['count'])
+        )
+    
+    console.print(table)
+    
+    # Best performer analysis
+    if agent_stats:
+        best = agent_stats[0]
+        console.print(f"\n[bold green]🏆 Best Performer: {best['agent']} (${best['mean']:.0f} average cost)[/bold green]")
+
+
+def display_llm_vs_baseline_results(results):
+    """Display LLM vs baseline comparison results"""
+    
+    console.print("\n[bold blue]🥊 LLM vs Baseline Results[/bold blue]")
+    
+    if not results:
+        console.print("[red]No results to display[/red]")
+        return
+    
+    # Separate LLM and baseline results
+    llm_results = [r for r in results if r['agent_type'] == 'llm']
+    baseline_results = [r for r in results if r['agent_type'] != 'llm']
+    
+    # Overall comparison table
+    table = Table(title="Agent Type Performance")
+    table.add_column("Agent Type", style="cyan")
+    table.add_column("Avg Cost", style="green")
+    table.add_column("Avg Service", style="blue")
+    table.add_column("Avg Bullwhip", style="yellow")
+    table.add_column("Experiments", style="white")
+    
+    # LLM performance (average across all conditions)
+    if llm_results:
+        llm_costs = [r['total_cost'] for r in llm_results]
+        llm_service = [r['service_level'] for r in llm_results]
+        llm_bullwhip = [r['bullwhip_ratio'] for r in llm_results]
+        
+        table.add_row(
+            "🤖 LLM",
+            f"${sum(llm_costs) / len(llm_costs):.0f}",
+            f"{sum(llm_service) / len(llm_service):.1%}",
+            f"{sum(llm_bullwhip) / len(llm_bullwhip):.2f}",
+            str(len(llm_results))
+        )
+    
+    # Baseline performance by agent type
+    baseline_agents = {}
+    for result in baseline_results:
+        agent = result['agent_type']
+        if agent not in baseline_agents:
+            baseline_agents[agent] = []
+        baseline_agents[agent].append(result)
+    
+    baseline_stats = []
+    for agent, agent_results in baseline_agents.items():
+        costs = [r['total_cost'] for r in agent_results]
+        service = [r['service_level'] for r in agent_results]
+        bullwhip = [r['bullwhip_ratio'] for r in agent_results]
+        
+        baseline_stats.append({
+            'agent': agent,
+            'avg_cost': sum(costs) / len(costs),
+            'avg_service': sum(service) / len(service),
+            'avg_bullwhip': sum(bullwhip) / len(bullwhip),
+            'count': len(agent_results)
+        })
+    
+    # Sort baseline agents by cost
+    baseline_stats.sort(key=lambda x: x['avg_cost'])
+    
+    for rank, stats in enumerate(baseline_stats, 1):
+        rank_emoji = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else f"{rank}"
+        
+        table.add_row(
+            f"{rank_emoji} {stats['agent']}",
+            f"${stats['avg_cost']:.0f}",
+            f"{stats['avg_service']:.1%}",
+            f"{stats['avg_bullwhip']:.2f}",
+            str(stats['count'])
+        )
+    
+    console.print(table)
+    
+    # Advantage analysis
+    if llm_results and baseline_results:
+        llm_avg_cost = sum(r['total_cost'] for r in llm_results) / len(llm_results)
+        best_baseline_cost = min(sum(costs) / len(costs) for costs in baseline_agents.values() if costs)
+        
+        advantage = (best_baseline_cost - llm_avg_cost) / best_baseline_cost * 100
+        
+        console.print(f"\n[bold green]🎯 LLM Performance Analysis:[/bold green]")
+        console.print(f"• LLM average cost: ${llm_avg_cost:.0f}")
+        console.print(f"• Best baseline cost: ${best_baseline_cost:.0f}")
+        console.print(f"• LLM advantage: {advantage:.1f}% cost reduction")
+        
+        if advantage > 0:
+            console.print(f"🎉 LLM outperforms all baseline agents!")
+        else:
+            console.print(f"🤔 Some baseline agents outperform LLM")
 
 
 def display_experimental_results(results, seeder=None):
