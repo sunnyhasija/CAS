@@ -1099,45 +1099,103 @@ class ComplexAdaptiveSystemsAnalyzer:
         except Exception as e:
             ax5.text(0.5, 0.5, 'Memory utilization analysis failed', ha='center', va='center')
         
-        # 6. Information Complexity Landscape
+        # 6. Information Complexity Landscape - FIXED VERSION
         ax6 = axes[1, 2]
         
         # Plot relationship between information complexity and performance
         complexity_data = []
         
         for _, exp in self.df.iterrows():
-            # Calculate information complexity score
-            visibility_score = {'local': 1, 'adjacent': 2, 'full': 3}.get(exp['visibility_level'], 1)
-            memory_score = {'none': 1, 'short': 2, 'full': 3}.get(exp['memory_strategy'], 1)
-            complexity = visibility_score * memory_score
+            try:
+                # Safely extract values and check if they're valid
+                total_cost = exp.get('total_cost', None)
+                service_level = exp.get('service_level', None)
+                bullwhip_ratio = exp.get('bullwhip_ratio', None)
+                visibility_level = exp.get('visibility_level', 'local')
+                memory_strategy = exp.get('memory_strategy', 'none')
+                
+                # Convert to scalar values if they're Series/arrays
+                if hasattr(total_cost, 'iloc'):
+                    total_cost = total_cost.iloc[0] if len(total_cost) > 0 else None
+                if hasattr(service_level, 'iloc'):
+                    service_level = service_level.iloc[0] if len(service_level) > 0 else None
+                if hasattr(bullwhip_ratio, 'iloc'):
+                    bullwhip_ratio = bullwhip_ratio.iloc[0] if len(bullwhip_ratio) > 0 else None
+                
+                # Check if all required values are valid numbers
+                if (total_cost is not None and service_level is not None and 
+                    bullwhip_ratio is not None and
+                    not pd.isna(total_cost) and not pd.isna(service_level) and 
+                    not pd.isna(bullwhip_ratio) and bullwhip_ratio > 0):
+                    
+                    # Calculate information complexity score
+                    visibility_score = {'local': 1, 'adjacent': 2, 'full': 3}.get(visibility_level, 1)
+                    memory_score = {'none': 1, 'short': 2, 'full': 3}.get(memory_strategy, 1)
+                    complexity = visibility_score * memory_score
+                    
+                    complexity_data.append({
+                        'complexity': float(complexity),
+                        'cost': float(total_cost),
+                        'service': float(service_level),
+                        'bullwhip': float(bullwhip_ratio)
+                    })
+            except Exception as e:
+                # Skip this row if there's any error
+                continue
+        
+        if len(complexity_data) > 0:
+            complexity_df = pd.DataFrame(complexity_data)
             
-            complexity_data.append({
-                'complexity': complexity,
-                'cost': exp['total_cost'],
-                'service': exp['service_level'],
-                'bullwhip': exp['bullwhip_ratio']
-            })
-        
-        complexity_df = pd.DataFrame(complexity_data)
-        
-        # Scatter plot with performance metrics
-        scatter = ax6.scatter(complexity_df['complexity'], 
-                             complexity_df['cost'],
-                             c=complexity_df['service'],
-                             s=100/complexity_df['bullwhip'],  # Size by inverse bullwhip
-                             alpha=0.6, cmap='viridis')
-        
-        # Add best fit line
-        z = np.polyfit(complexity_df['complexity'], complexity_df['cost'], 2)
-        p = np.poly1d(z)
-        x_line = np.linspace(1, 9, 100)
-        ax6.plot(x_line, p(x_line), 'r--', alpha=0.8, linewidth=2)
-        
-        ax6.set_xlabel('Information Complexity Score')
-        ax6.set_ylabel('Total Cost')
-        ax6.set_title('Information Complexity vs Performance')
-        plt.colorbar(scatter, ax=ax6, label='Service Level')
-        ax6.grid(True, alpha=0.3)
+            # Convert to numpy arrays
+            x_vals = complexity_df['complexity'].values
+            y_vals = complexity_df['cost'].values
+            c_vals = complexity_df['service'].values
+            bullwhip_raw = complexity_df['bullwhip'].values
+            
+            # Clean and clip the bullwhip values
+            bullwhip_vals = np.nan_to_num(bullwhip_raw, nan=1.0, posinf=10.0, neginf=0.01)
+            bullwhip_vals = np.clip(bullwhip_vals, 0.01, 10)
+            
+            # Calculate size values
+            s_vals = 100 / bullwhip_vals
+            s_vals = np.clip(s_vals, 10, 500)
+            
+            # Final check: ensure no NaN or inf values
+            valid_mask = (np.isfinite(x_vals) & np.isfinite(y_vals) & 
+                         np.isfinite(c_vals) & np.isfinite(s_vals))
+            
+            if valid_mask.sum() > 0:
+                x_vals = x_vals[valid_mask]
+                y_vals = y_vals[valid_mask]
+                c_vals = c_vals[valid_mask]
+                s_vals = s_vals[valid_mask]
+                
+                # Scatter plot with performance metrics
+                scatter = ax6.scatter(x_vals, y_vals, c=c_vals, s=s_vals, alpha=0.6, cmap='viridis')
+                
+                # Add best fit line
+                if len(x_vals) > 2:
+                    try:
+                        z = np.polyfit(x_vals, y_vals, 2)
+                        p = np.poly1d(z)
+                        x_line = np.linspace(x_vals.min(), x_vals.max(), 100)
+                        ax6.plot(x_line, p(x_line), 'r--', alpha=0.8, linewidth=2)
+                    except:
+                        pass  # Skip fit line if it fails
+                
+                ax6.set_xlabel('Information Complexity Score')
+                ax6.set_ylabel('Total Cost')
+                ax6.set_title('Information Complexity vs Performance')
+                plt.colorbar(scatter, ax=ax6, label='Service Level')
+                ax6.grid(True, alpha=0.3)
+            else:
+                ax6.text(0.5, 0.5, 'No valid data after cleaning', 
+                        ha='center', va='center', transform=ax6.transAxes)
+                ax6.set_title('Information Complexity vs Performance')
+        else:
+            ax6.text(0.5, 0.5, 'Insufficient data for complexity analysis', 
+                    ha='center', va='center', transform=ax6.transAxes)
+            ax6.set_title('Information Complexity vs Performance')
         
         plt.suptitle('Information Dynamics in Supply Chain CAS', fontsize=16, fontweight='bold')
         plt.tight_layout()
@@ -1153,7 +1211,6 @@ class ComplexAdaptiveSystemsAnalyzer:
         print("3. Optimal Complexity: Best performance at moderate information levels")
         print("4. Memory Impact: Short memory (5 periods) often outperforms full history")
         print("5. Information Value: Full visibility can reduce costs by up to 20%")
-    
     
     def analyze_system_resilience(self):
         """
@@ -1294,7 +1351,7 @@ class ComplexAdaptiveSystemsAnalyzer:
             ax2.legend(title='Game Mode')
             ax2.grid(True, alpha=0.3)
         
-        # 3. Robustness to Initial Conditions
+        # 3. Robustness to Initial Conditions - FIXED VERSION
         ax3 = axes[0, 2]
         
         # Analyze sensitivity to different starting conditions
@@ -1305,28 +1362,65 @@ class ComplexAdaptiveSystemsAnalyzer:
         
         for config, group in config_groups:
             if len(group) >= 3:  # Need multiple runs
-                # Calculate coefficient of variation in outcomes
-                cv_cost = group['total_cost'].std() / group['total_cost'].mean()
-                cv_bullwhip = group['bullwhip_ratio'].std() / group['bullwhip_ratio'].mean()
-                
-                robustness_results.append({
-                    'config': f"{config[0][:1]}-{config[1][:1]}",  # Short labels
-                    'cost_cv': cv_cost,
-                    'bullwhip_cv': cv_bullwhip,
-                    'robustness': 1 / (1 + cv_cost + cv_bullwhip)  # Combined robustness
-                })
+                try:
+                    # Safely extract scalar values
+                    costs = []
+                    bullwhips = []
+                    
+                    for _, row in group.iterrows():
+                        # Extract scalar values safely
+                        cost = row.get('total_cost', None)
+                        bullwhip = row.get('bullwhip_ratio', None)
+                        
+                        # Handle Series/array values
+                        if hasattr(cost, 'iloc'):
+                            cost = cost.iloc[0] if len(cost) > 0 else None
+                        if hasattr(bullwhip, 'iloc'):
+                            bullwhip = bullwhip.iloc[0] if len(bullwhip) > 0 else None
+                        
+                        # Only include valid numeric values
+                        if cost is not None and not pd.isna(cost) and cost > 0:
+                            costs.append(float(cost))
+                        if bullwhip is not None and not pd.isna(bullwhip) and bullwhip > 0:
+                            bullwhips.append(float(bullwhip))
+                    
+                    # Calculate coefficient of variation if we have enough data
+                    if len(costs) >= 3 and len(bullwhips) >= 3:
+                        cv_cost = np.std(costs) / np.mean(costs) if np.mean(costs) > 0 else 0
+                        cv_bullwhip = np.std(bullwhips) / np.mean(bullwhips) if np.mean(bullwhips) > 0 else 0
+                        
+                        robustness_results.append({
+                            'config': f"{config[0][:1]}-{config[1][:1]}",  # Short labels
+                            'cost_cv': cv_cost,
+                            'bullwhip_cv': cv_bullwhip,
+                            'robustness': 1 / (1 + cv_cost + cv_bullwhip)  # Combined robustness
+                        })
+                except Exception as e:
+                    # Skip this configuration if there's an error
+                    continue
         
         if robustness_results:
             robust_df = pd.DataFrame(robustness_results)
-            robust_df = robust_df.sort_values('robustness', ascending=False).head(10)
             
-            # Plot robustness scores
-            ax3.bar(range(len(robust_df)), robust_df['robustness'])
-            ax3.set_xticks(range(len(robust_df)))
-            ax3.set_xticklabels(robust_df['config'], rotation=45)
-            ax3.set_ylabel('Robustness Score')
-            ax3.set_title('Top 10 Most Robust Configurations')
-            ax3.grid(True, alpha=0.3)
+            # Sort by robustness score (now safe since all values are scalars)
+            try:
+                robust_df = robust_df.sort_values('robustness', ascending=False).head(10)
+                
+                # Plot robustness scores
+                ax3.bar(range(len(robust_df)), robust_df['robustness'])
+                ax3.set_xticks(range(len(robust_df)))
+                ax3.set_xticklabels(robust_df['config'], rotation=45)
+                ax3.set_ylabel('Robustness Score')
+                ax3.set_title('Top 10 Most Robust Configurations')
+                ax3.grid(True, alpha=0.3)
+            except Exception as e:
+                ax3.text(0.5, 0.5, f'Robustness analysis failed: {str(e)}', 
+                        ha='center', va='center', transform=ax3.transAxes)
+                ax3.set_title('Robustness Analysis')
+        else:
+            ax3.text(0.5, 0.5, 'Insufficient data for robustness analysis', 
+                    ha='center', va='center', transform=ax3.transAxes)
+            ax3.set_title('Robustness Analysis')
         
         # 4. Adaptive Capacity Analysis
         ax4 = axes[1, 0]
@@ -1391,48 +1485,81 @@ class ComplexAdaptiveSystemsAnalyzer:
         resilience_metrics = []
         
         for _, exp in self.df.iterrows():
-            # Calculate composite resilience score
-            volatility = 1 / (1 + exp.get('bullwhip_ratio', 2))  # Lower bullwhip = higher resilience
-            efficiency = 1 / (1 + exp['total_cost'] / 10000)  # Normalized cost
-            service = exp.get('service_level', 0.5)
+            try:
+                # Safely extract values
+                total_cost = exp.get('total_cost', None)
+                service_level = exp.get('service_level', None)
+                bullwhip_ratio = exp.get('bullwhip_ratio', None)
+                memory_strategy = exp.get('memory_strategy', 'none')
+                visibility_level = exp.get('visibility_level', 'local')
+                
+                # Handle Series/array values
+                if hasattr(total_cost, 'iloc'):
+                    total_cost = total_cost.iloc[0] if len(total_cost) > 0 else None
+                if hasattr(service_level, 'iloc'):
+                    service_level = service_level.iloc[0] if len(service_level) > 0 else None
+                if hasattr(bullwhip_ratio, 'iloc'):
+                    bullwhip_ratio = bullwhip_ratio.iloc[0] if len(bullwhip_ratio) > 0 else None
+                
+                # Only process if we have valid data
+                if (total_cost is not None and service_level is not None and 
+                    bullwhip_ratio is not None and not pd.isna(total_cost) and 
+                    not pd.isna(service_level) and not pd.isna(bullwhip_ratio)):
+                    
+                    # Calculate composite resilience score
+                    volatility = 1 / (1 + float(bullwhip_ratio))  # Lower bullwhip = higher resilience
+                    efficiency = 1 / (1 + float(total_cost) / 10000)  # Normalized cost
+                    service = float(service_level)
+                    
+                    resilience_score = (volatility + efficiency + service) / 3
+                    
+                    resilience_metrics.append({
+                        'memory': memory_strategy,
+                        'visibility': visibility_level,
+                        'resilience': resilience_score,
+                        'performance': float(total_cost)
+                    })
+            except Exception as e:
+                continue
+        
+        if len(resilience_metrics) > 0:
+            res_df = pd.DataFrame(resilience_metrics)
             
-            resilience_score = (volatility + efficiency + service) / 3
+            # Create 2D histogram
+            memory_map = {'none': 0, 'short': 1, 'full': 2}
+            vis_map = {'local': 0, 'adjacent': 1, 'full': 2}
             
-            resilience_metrics.append({
-                'memory': exp['memory_strategy'],
-                'visibility': exp['visibility_level'],
-                'resilience': resilience_score,
-                'performance': exp['total_cost']
-            })
-        
-        res_df = pd.DataFrame(resilience_metrics)
-        
-        # Create 2D histogram
-        memory_map = {'none': 0, 'short': 1, 'full': 2}
-        vis_map = {'local': 0, 'adjacent': 1, 'full': 2}
-        
-        res_df['mem_num'] = res_df['memory'].map(memory_map)
-        res_df['vis_num'] = res_df['visibility'].map(vis_map)
-        
-        # Calculate average resilience for each cell
-        pivot = res_df.pivot_table(index='mem_num', columns='vis_num', values='resilience', aggfunc='mean')
-        
-        im = ax5.imshow(pivot, cmap='RdYlGn', aspect='auto')
-        ax5.set_xticks(range(3))
-        ax5.set_yticks(range(3))
-        ax5.set_xticklabels(['Local', 'Adjacent', 'Full'])
-        ax5.set_yticklabels(['None', 'Short', 'Full'])
-        ax5.set_xlabel('Visibility')
-        ax5.set_ylabel('Memory')
-        ax5.set_title('Resilience Phase Diagram')
-        
-        # Add text annotations
-        for i in range(3):
-            for j in range(3):
-                if not np.isnan(pivot.iloc[i, j]):
-                    ax5.text(j, i, f'{pivot.iloc[i, j]:.2f}', ha='center', va='center')
-        
-        plt.colorbar(im, ax=ax5, label='Resilience Score')
+            res_df['mem_num'] = res_df['memory'].map(memory_map)
+            res_df['vis_num'] = res_df['visibility'].map(vis_map)
+            
+            # Calculate average resilience for each cell
+            pivot = res_df.pivot_table(index='mem_num', columns='vis_num', values='resilience', aggfunc='mean')
+            
+            if not pivot.empty:
+                im = ax5.imshow(pivot, cmap='RdYlGn', aspect='auto')
+                ax5.set_xticks(range(3))
+                ax5.set_yticks(range(3))
+                ax5.set_xticklabels(['Local', 'Adjacent', 'Full'])
+                ax5.set_yticklabels(['None', 'Short', 'Full'])
+                ax5.set_xlabel('Visibility')
+                ax5.set_ylabel('Memory')
+                ax5.set_title('Resilience Phase Diagram')
+                
+                # Add text annotations
+                for i in range(3):
+                    for j in range(3):
+                        if not np.isnan(pivot.iloc[i, j]):
+                            ax5.text(j, i, f'{pivot.iloc[i, j]:.2f}', ha='center', va='center')
+                
+                plt.colorbar(im, ax=ax5, label='Resilience Score')
+            else:
+                ax5.text(0.5, 0.5, 'Insufficient data for phase diagram', 
+                        ha='center', va='center', transform=ax5.transAxes)
+                ax5.set_title('Resilience Phase Diagram')
+        else:
+            ax5.text(0.5, 0.5, 'Insufficient data for resilience analysis', 
+                    ha='center', va='center', transform=ax5.transAxes)
+            ax5.set_title('Resilience Phase Diagram')
         
         # 6. Perturbation Response Profiles
         ax6 = axes[1, 2]

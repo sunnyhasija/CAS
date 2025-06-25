@@ -54,7 +54,7 @@ def generate_random_demand(length: int = 50, mean: float = 4.0, std: float = 2.0
         std: Standard deviation of demand
         seed: Random seed for reproducibility (default: from seeding system)
     """
-    np.random.seed(seed)
+    np.random.seed(seed % (2**32))
     demands = np.random.normal(mean, std, length)
     demands = np.maximum(1, demands).astype(int)  # Ensure minimum demand of 1
     return demands.tolist()
@@ -76,7 +76,7 @@ def generate_shock_demand(length: int = 50, base_demand: int = 4, shock_magnitud
     """
     # Use seed to add slight variation to shock timing if desired
     if seed != CANONICAL_SEED:
-        np.random.seed(seed)
+        np.random.seed(seed % (2**32))
         pattern = [base_demand] * length
         for i in range(shock_frequency, length, shock_frequency):
             if i < length:
@@ -108,7 +108,7 @@ def generate_seasonal_demand(length: int = 50, base_demand: float = 4.0, amplitu
         seed: Random seed for adding realistic noise (optional)
     """
     if seed != CANONICAL_SEED:
-        np.random.seed(seed)
+        np.random.seed(seed % (2**32))
         add_noise = True
     else:
         add_noise = False

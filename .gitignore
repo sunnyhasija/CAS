@@ -15,7 +15,9 @@ test_*.csv
 experiment_*.csv
 comprehensive_*.csv
 *_comparison.csv
-
+# All database backup files
+*.db.backup*
+*.json
 # Analysis Files & Notebooks
 analysis/
 results/

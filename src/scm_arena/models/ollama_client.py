@@ -561,7 +561,7 @@ def create_ollama_agents(
             top_p=top_p,
             top_k=top_k,
             repeat_penalty=repeat_penalty,
-            seed=seed,
+            seed=seed % (2**32),  # Truncate to 32-bit for Ollama compatibility
             **kwargs
         )
         for position in Position
