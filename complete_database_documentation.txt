@@ -1,0 +1,197 @@
+
+-- DATABASE SCHEMA
+.schema
+CREATE TABLE experiments (
+                experiment_id TEXT PRIMARY KEY,
+                model_name TEXT NOT NULL,
+                memory_strategy TEXT NOT NULL,
+                memory_window INTEGER,
+                prompt_type TEXT NOT NULL,
+                visibility_level TEXT NOT NULL,
+                scenario TEXT NOT NULL,
+                game_mode TEXT NOT NULL,
+                rounds INTEGER NOT NULL,
+                run_number INTEGER NOT NULL,
+                timestamp TEXT NOT NULL,
+                total_cost REAL NOT NULL,
+                service_level REAL NOT NULL,
+                bullwhip_ratio REAL NOT NULL,
+                temperature REAL NOT NULL,
+                top_p REAL NOT NULL,
+                top_k INTEGER NOT NULL,
+                repeat_penalty REAL NOT NULL,
+                seed INTEGER NOT NULL,
+                base_seed INTEGER NOT NULL,
+                deterministic_seeding BOOLEAN NOT NULL
+            );
+CREATE TABLE rounds (
+                experiment_id TEXT NOT NULL,
+                round_number INTEGER NOT NULL,
+                customer_demand INTEGER NOT NULL,
+                total_system_cost REAL NOT NULL,
+                total_system_inventory INTEGER NOT NULL,
+                total_system_backlog INTEGER NOT NULL,
+                PRIMARY KEY (experiment_id, round_number),
+                FOREIGN KEY (experiment_id) REFERENCES experiments (experiment_id)
+            );
+CREATE TABLE agent_rounds (
+                experiment_id TEXT NOT NULL,
+                round_number INTEGER NOT NULL,
+                position TEXT NOT NULL,
+                inventory INTEGER NOT NULL,
+                backlog INTEGER NOT NULL,
+                incoming_order INTEGER NOT NULL,
+                outgoing_order INTEGER NOT NULL,
+                round_cost REAL NOT NULL,
+                total_cost REAL NOT NULL,
+                prompt_sent TEXT NOT NULL,
+                llm_response TEXT NOT NULL,
+                decision INTEGER NOT NULL,
+                decision_time_ms REAL NOT NULL,
+                PRIMARY KEY (experiment_id, round_number, position),
+                FOREIGN KEY (experiment_id) REFERENCES experiments (experiment_id)
+            );
+CREATE TABLE game_states (
+                experiment_id TEXT NOT NULL,
+                round_number INTEGER NOT NULL,
+                game_state_json TEXT NOT NULL,
+                PRIMARY KEY (experiment_id, round_number),
+                FOREIGN KEY (experiment_id) REFERENCES experiments (experiment_id)
+            );
+CREATE INDEX idx_exp_scenario ON experiments(scenario);
+CREATE INDEX idx_exp_memory ON experiments(memory_strategy);
+CREATE INDEX idx_exp_visibility ON experiments(visibility_level);
+CREATE INDEX idx_rounds_exp ON rounds(experiment_id);
+CREATE INDEX idx_agent_exp ON agent_rounds(experiment_id);
+
+-- SUMMARY STATISTICS
+SELECT '=== DATABASE SUMMARY ===' AS '';
+                        
+------------------------
+=== DATABASE SUMMARY ===
+SELECT 'Total Experiments: ' || COUNT(*) FROM experiments;
+'Total Experiments: ' || COUNT(*)
+---------------------------------
+Total Experiments: 3388          
+SELECT 'Total Rounds: ' || COUNT(*) FROM rounds;
+'Total Rounds: ' || COUNT(*)
+----------------------------
+Total Rounds: 244813        
+SELECT 'Total Agent Rounds: ' || COUNT(*) FROM agent_rounds;
+'Total Agent Rounds: ' || COUNT(*)
+----------------------------------
+Total Agent Rounds: 979252        
+
+-- MODEL BREAKDOWN
+SELECT '';
+''
+--
+  
+SELECT '=== EXPERIMENTS BY MODEL ===' AS '';
+                            
+----------------------------
+=== EXPERIMENTS BY MODEL ===
+SELECT model_name, COUNT(*) as experiments FROM experiments GROUP BY model_name;
+model_name  experiments
+----------  -----------
+basestock   108        
+llama3.2    2848       
+movingavg   108        
+newsvendor  108        
+reactive    108        
+sterman     108        
+
+-- PERFORMANCE METRICS
+SELECT '';
+''
+--
+  
+SELECT '=== PERFORMANCE BY MODEL ===' AS '';
+                            
+----------------------------
+=== PERFORMANCE BY MODEL ===
+SELECT model_name, 
+       COUNT(*) as n,
+       ROUND(AVG(total_cost),2) as avg_cost,
+       ROUND(MIN(total_cost),2) as min_cost,
+       ROUND(MAX(total_cost),2) as max_cost,
+       ROUND(AVG(service_level),3) as avg_service_level,
+       ROUND(AVG(bullwhip_ratio),2) as avg_bullwhip
+FROM experiments 
+GROUP BY model_name
+ORDER BY avg_cost;
+model_name  n     avg_cost  min_cost  max_cost  avg_service_level  avg_bullwhip
+----------  ----  --------  --------  --------  -----------------  ------------
+llama3.2    2848  13414.14  7360.0    32628.0   0.718              1.77        
+sterman     108   55358.0   38945.0   72610.0   0.598              0.99        
+newsvendor  108   81528.67  55408.0   108158.0  0.56               0.77        
+basestock   108   89961.83  65125.0   115396.0  0.695              2.54        
+reactive    108   92690.17  69523.0   114920.0  0.776              1.97        
+movingavg   108   94665.17  65439.0   124286.0  0.586              5.63        
+
+-- EXPERIMENTAL CONDITIONS
+SELECT '';
+''
+--
+  
+SELECT '=== EXPERIMENTAL CONDITIONS ===' AS '';
+                               
+-------------------------------
+=== EXPERIMENTAL CONDITIONS ===
+SELECT memory_strategy, prompt_type, visibility_level, scenario, game_mode, COUNT(*) as count
+FROM experiments
+WHERE model_name = 'llama3.2'
+GROUP BY memory_strategy, prompt_type, visibility_level, scenario, game_mode
+ORDER BY count DESC
+LIMIT 20;
+memory_strategy  prompt_type  visibility_level  scenario  game_mode  count
+---------------  -----------  ----------------  --------  ---------  -----
+full             neutral      adjacent          classic   classic    20   
+full             neutral      adjacent          classic   modern     20   
+full             neutral      adjacent          random    classic    20   
+full             neutral      adjacent          random    modern     20   
+full             neutral      adjacent          seasonal  classic    20   
+full             neutral      adjacent          seasonal  modern     20   
+full             neutral      adjacent          shock     classic    20   
+full             neutral      adjacent          shock     modern     20   
+full             neutral      full              classic   classic    20   
+full             neutral      full              classic   modern     20   
+full             neutral      full              random    classic    20   
+full             neutral      full              random    modern     20   
+full             neutral      full              shock     classic    20   
+full             neutral      full              shock     modern     20   
+full             neutral      local             classic   classic    20   
+full             neutral      local             classic   modern     20   
+full             neutral      local             random    classic    20   
+full             neutral      local             random    modern     20   
+full             neutral      local             seasonal  classic    20   
+full             neutral      local             seasonal  modern     20   
+
+-- BASELINE COMPARISON
+SELECT '';
+''
+--
+  
+SELECT '=== LLM vs BASELINE COMPARISON ===' AS '';
+                                  
+----------------------------------
+=== LLM vs BASELINE COMPARISON ===
+SELECT 
+  CASE 
+    WHEN model_name = 'llama3.2' THEN 'LLM (llama3.2)'
+    ELSE 'Baseline (' || model_name || ')'
+  END as agent_type,
+  COUNT(*) as experiments,
+  ROUND(AVG(total_cost),2) as avg_cost,
+  ROUND(AVG(service_level),3) as avg_service
+FROM experiments
+GROUP BY agent_type
+ORDER BY avg_cost;
+agent_type             experiments  avg_cost  avg_service
+---------------------  -----------  --------  -----------
+LLM (llama3.2)         2848         13414.14  0.718      
+Baseline (sterman)     108          55358.0   0.598      
+Baseline (newsvendor)  108          81528.67  0.56       
+Baseline (basestock)   108          89961.83  0.695      
+Baseline (reactive)    108          92690.17  0.776      
+Baseline (movingavg)   108          94665.17  0.586      

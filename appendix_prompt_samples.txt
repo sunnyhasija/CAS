@@ -1,0 +1,238 @@
+APPENDIX: SCM-ARENA PROMPT EXAMPLES
+===================================
+Sample prompts showing all Memory Strategy × Visibility Level combinations
+All examples from Round 10, Retailer position, llama3.2 model
+
+
+1. MEMORY: NONE × VISIBILITY: LOCAL
+-----------------------------------
+
+PERIOD 9
+Position: RETAILER
+Current inventory: 0 units
+Current backlog: 44 units
+Incoming order: 8 units
+Last order placed: 4 units
+Period cost: $72.00
+Customer demand: 8 units
+Operating in reactive mode (no decision history)
+
+Make your order decision based on current period information only.
+How many units should you order this period to minimize your total costs?
+
+
+2. MEMORY: NONE × VISIBILITY: ADJACENT
+--------------------------------------
+
+PERIOD 9
+Position: RETAILER
+Current inventory: 0 units
+Current backlog: 44 units
+Incoming order: 8 units
+Last order placed: 8 units
+Period cost: $72.00
+Customer demand: 8 units
+Operating in reactive mode (no decision history)
+
+SUPPLY CHAIN VISIBILITY:
+Wholesaler: Inventory=0, Backlog=6, Cost=$12.00
+  Wholesaler history not available (reactive mode)
+
+PARTNER HISTORY:
+Wholesaler history not available (reactive mode)
+
+Make your order decision based on current period information only.
+How many units should you order this period to minimize your total costs?
+
+
+3. MEMORY: NONE × VISIBILITY: FULL
+----------------------------------
+
+PERIOD 9
+Position: RETAILER
+Current inventory: 0 units
+Current backlog: 44 units
+Incoming order: 8 units
+Last order placed: 8 units
+Period cost: $72.00
+Customer demand: 8 units
+Operating in reactive mode (no decision history)
+
+SUPPLY CHAIN VISIBILITY:
+Wholesaler: Inventory=0, Backlog=7, Cost=$14.00
+  Wholesaler history not available (reactive mode)
+Distributor: Inventory=22, Backlog=0, Cost=$23.00
+  Distributor history not available (reactive mode)
+Manufacturer: Inventory=0, Backlog=12, Cost=$14.00
+  Manufacturer history not available (reactive mode)
+
+PARTNER HISTORY:
+Wholesaler history not available (reactive mode)
+Distributor history not available (reactive mode)
+Manufacturer history not available (reactive mode)
+
+SYSTEM METRICS:
+Total system cost: $610.00
+Total system inventory: 22 units
+Total system backlog: 63 units
+
+Make your order decision based on current period information only.
+How many units should you order this period to minimize your total costs?
+
+
+4. MEMORY: SHORT × VISIBILITY: LOCAL
+------------------------------------
+
+PERIOD 9
+Position: RETAILER
+Current inventory: 0 units
+Current backlog: 44 units
+Incoming order: 8 units
+Last order placed: 4 units
+Period cost: $72.00
+Customer demand: 8 units
+Your Recent 5 order(s): [4, 4, 4, 4, 4]
+
+Consider your recent information when making this decision.
+How many units should you order this period to minimize your total costs?
+
+
+5. MEMORY: SHORT × VISIBILITY: ADJACENT
+---------------------------------------
+
+PERIOD 9
+Position: RETAILER
+Current inventory: 0 units
+Current backlog: 44 units
+Incoming order: 8 units
+Last order placed: 4 units
+Period cost: $72.00
+Customer demand: 8 units
+Your Recent 5 order(s): [8, 8, 8, 4, 4]
+
+SUPPLY CHAIN VISIBILITY:
+Wholesaler: Inventory=4, Backlog=0, Cost=$8.00
+  Wholesaler recent orders: [8, 8, 8, 8, 8]
+
+PARTNER HISTORY:
+Wholesaler history: ['R5:Inv12,Order8', 'R6:Inv12,Order8', 'R7:Inv12,Order8', 'R8:Inv12,Order8', 'R9:Inv8,Order8']
+
+Consider your recent information when making this decision.
+How many units should you order this period to minimize your total costs?
+
+
+6. MEMORY: SHORT × VISIBILITY: FULL
+-----------------------------------
+
+PERIOD 9
+Position: RETAILER
+Current inventory: 0 units
+Current backlog: 44 units
+Incoming order: 8 units
+Last order placed: 8 units
+Period cost: $72.00
+Customer demand: 8 units
+Your Recent 5 order(s): [8, 8, 8, 8, 8]
+
+SUPPLY CHAIN VISIBILITY:
+Wholesaler: Inventory=20, Backlog=0, Cost=$20.00
+  Wholesaler recent orders: [6, 6, 6, 6, 6]
+Distributor: Inventory=8, Backlog=0, Cost=$10.00
+  Distributor recent orders: [8, 4, 8, 4, 8]
+Manufacturer: Inventory=8, Backlog=0, Cost=$8.00
+  Manufacturer recent orders: [8, 4, 8, 4, 8]
+
+PARTNER HISTORY:
+Wholesaler history: ['R5:Inv20,Order6', 'R6:Inv20,Order6', 'R7:Inv20,Order6', 'R8:Inv20,Order6', 'R9:Inv20,Order6']
+Distributor history: ['R5:Inv18,Order8', 'R6:Inv16,Order4', 'R7:Inv14,Order8', 'R8:Inv12,Order4', 'R9:Inv10,Order8']
+Manufacturer history: ['R5:Inv16,Order8', 'R6:Inv16,Order4', 'R7:Inv12,Order8', 'R8:Inv12,Order4', 'R9:Inv8,Order8']
+
+SYSTEM METRICS:
+Total system cost: $652.00
+Total system inventory: 36 units
+Total system backlog: 44 units
+
+Consider your recent information when making this decision.
+How many units should you order this period to minimize your total costs?
+
+
+7. MEMORY: FULL × VISIBILITY: LOCAL
+-----------------------------------
+
+PERIOD 9
+Position: RETAILER
+Current inventory: 0 units
+Current backlog: 44 units
+Incoming order: 8 units
+Last order placed: 4 units
+Period cost: $72.00
+Customer demand: 8 units
+Your Complete order history: [8, 0, 0, 0, 8, 0, 8, 28, 4]
+
+Consider your complete order history when making this decision.
+How many units should you order this period to minimize your total costs?
+
+
+8. MEMORY: FULL × VISIBILITY: ADJACENT
+--------------------------------------
+
+PERIOD 9
+Position: RETAILER
+Current inventory: 0 units
+Current backlog: 44 units
+Incoming order: 8 units
+Last order placed: 8 units
+Period cost: $72.00
+Customer demand: 8 units
+Your Complete order history: [8, 4, 4, 4, 8, 4, 4, 4, 8]
+
+SUPPLY CHAIN VISIBILITY:
+Wholesaler: Inventory=0, Backlog=0, Cost=$0.00
+  Wholesaler recent orders: [8, 0, 0, 4, 8, 4, 8, 4, 8]
+
+PARTNER HISTORY:
+Wholesaler history: ['R1:Inv12,Order8', 'R2:Inv16,Order0', 'R3:Inv16,Order0', 'R4:Inv16,Order4', 'R5:Inv12,Order8', 'R6:Inv12,Order4', 'R7:Inv8,Order8', 'R8:Inv4,Order4', 'R9:Inv0,Order8']
+
+Consider your complete order history when making this decision.
+How many units should you order this period to minimize your total costs?
+
+
+9. MEMORY: FULL × VISIBILITY: FULL
+----------------------------------
+
+PERIOD 9
+Position: RETAILER
+Current inventory: 0 units
+Current backlog: 44 units
+Incoming order: 8 units
+Last order placed: 10 units
+Period cost: $72.00
+Customer demand: 8 units
+Your Complete order history: [4, 2, 6, 2, 6, 10, 8, 4, 10]
+
+SUPPLY CHAIN VISIBILITY:
+Wholesaler: Inventory=4, Backlog=0, Cost=$2.00
+  Wholesaler recent orders: [8, 4, 4, 2, 10, 8, 10, 10, 8]
+Distributor: Inventory=16, Backlog=0, Cost=$16.00
+  Distributor recent orders: [8, 4, 0, 8, 6, 8, 6, 8, 6]
+Manufacturer: Inventory=0, Backlog=4, Cost=$4.00
+  Manufacturer recent orders: [8, 4, 6, 2, 4, 4, 6, 4, 6]
+
+PARTNER HISTORY:
+Wholesaler history: ['R1:Inv12,Order8', 'R2:Inv12,Order4', 'R3:Inv10,Order4', 'R4:Inv12,Order2', 'R5:Inv6,Order10', 'R6:Inv4,Order8', 'R7:Inv6,Order10', 'R8:Inv6,Order10', 'R9:Inv2,Order8']
+Distributor history: ['R1:Inv12,Order8', 'R2:Inv16,Order4', 'R3:Inv16,Order0', 'R4:Inv16,Order8', 'R5:Inv10,Order6', 'R6:Inv12,Order8', 'R7:Inv12,Order6', 'R8:Inv14,Order8', 'R9:Inv16,Order6']
+Manufacturer history: ['R1:Inv12,Order8', 'R2:Inv16,Order4', 'R3:Inv16,Order6', 'R4:Inv18,Order2', 'R5:Inv12,Order4', 'R6:Inv8,Order4', 'R7:Inv4,Order6', 'R8:Inv2,Order4', 'R9:Inv0,Order6']
+
+SYSTEM METRICS:
+Total system cost: $522.00
+Total system inventory: 20 units
+Total system backlog: 48 units
+
+Consider your complete order history when making this decision.
+How many units should you order this period to minimize your total costs?
+
+
+
+Note: System prompts (position-specific vs neutral) are not shown here as they are not stored in the database.
+See source code for full system prompt text.
+

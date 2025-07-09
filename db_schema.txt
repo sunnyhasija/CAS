@@ -1,0 +1,71 @@
+CREATE TABLE experiments (
+                experiment_id TEXT PRIMARY KEY,
+                model_name TEXT NOT NULL,
+                memory_strategy TEXT NOT NULL,
+                memory_window INTEGER,
+                prompt_type TEXT NOT NULL,
+                visibility_level TEXT NOT NULL,
+                scenario TEXT NOT NULL,
+                game_mode TEXT NOT NULL,
+                rounds INTEGER NOT NULL,
+                run_number INTEGER NOT NULL,
+                timestamp TEXT NOT NULL,
+                total_cost REAL NOT NULL,
+                service_level REAL NOT NULL,
+                bullwhip_ratio REAL NOT NULL,
+                temperature REAL NOT NULL,
+                top_p REAL NOT NULL,
+                top_k INTEGER NOT NULL,
+                repeat_penalty REAL NOT NULL,
+                seed INTEGER NOT NULL,
+                base_seed INTEGER NOT NULL,
+                deterministic_seeding BOOLEAN NOT NULL
+            );
+CREATE TABLE rounds (
+                experiment_id TEXT NOT NULL,
+                round_number INTEGER NOT NULL,
+                customer_demand INTEGER NOT NULL,
+                total_system_cost REAL NOT NULL,
+                total_system_inventory INTEGER NOT NULL,
+                total_system_backlog INTEGER NOT NULL,
+                PRIMARY KEY (experiment_id, round_number),
+                FOREIGN KEY (experiment_id) REFERENCES experiments (experiment_id)
+            );
+CREATE TABLE agent_rounds (
+                experiment_id TEXT NOT NULL,
+                round_number INTEGER NOT NULL,
+                position TEXT NOT NULL,
+                inventory INTEGER NOT NULL,
+                backlog INTEGER NOT NULL,
+                incoming_order INTEGER NOT NULL,
+                outgoing_order INTEGER NOT NULL,
+                round_cost REAL NOT NULL,
+                total_cost REAL NOT NULL,
+                prompt_sent TEXT NOT NULL,
+                llm_response TEXT NOT NULL,
+                decision INTEGER NOT NULL,
+                decision_time_ms REAL NOT NULL,
+                PRIMARY KEY (experiment_id, round_number, position),
+                FOREIGN KEY (experiment_id) REFERENCES experiments (experiment_id)
+            );
+CREATE TABLE game_states (
+                experiment_id TEXT NOT NULL,
+                round_number INTEGER NOT NULL,
+                game_state_json TEXT NOT NULL,
+                PRIMARY KEY (experiment_id, round_number),
+                FOREIGN KEY (experiment_id) REFERENCES experiments (experiment_id)
+            );
+CREATE INDEX idx_exp_scenario ON experiments(scenario);
+CREATE INDEX idx_exp_memory ON experiments(memory_strategy);
+CREATE INDEX idx_exp_visibility ON experiments(visibility_level);
+CREATE INDEX idx_rounds_exp ON rounds(experiment_id);
+CREATE INDEX idx_agent_exp ON agent_rounds(experiment_id);
+'experiments: ' || COUNT(*)
+---------------------------
+experiments: 3388          
+'rounds: ' || COUNT(*)
+----------------------
+rounds: 244813        
+'agent_rounds: ' || COUNT(*)
+----------------------------
+agent_rounds: 979252        

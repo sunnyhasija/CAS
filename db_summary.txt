@@ -1,0 +1,22 @@
+                        
+------------------------
+=== DATABASE SUMMARY ===
+total_experiments
+-----------------
+3388             
+model_name  count
+----------  -----
+basestock   108  
+llama3.2    2848 
+movingavg   108  
+newsvendor  108  
+reactive    108  
+sterman     108  
+model_name  avg_cost
+----------  --------
+basestock   89961.83
+llama3.2    13414.14
+movingavg   94665.17
+newsvendor  81528.67
+reactive    92690.17
+sterman     55358.0 

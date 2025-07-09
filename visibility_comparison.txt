@@ -1,0 +1,78 @@
+=== VISIBILITY COMPARISON ===
+
+
+1. LOCAL VISIBILITY (own state only):
+-------------------------------------
+
+PERIOD 9
+Position: RETAILER
+Current inventory: 0 units
+Current backlog: 44 units
+Incoming order: 8 units
+Last order placed: 4 units
+Period cost: $72.00
+Customer demand: 8 units
+Your Recent 5 order(s): [4, 4, 4, 4, 4]
+
+Consider your recent information when making this decision.
+How many units should you order this period to minimize your total costs?
+
+
+2. ADJACENT VISIBILITY (includes neighbors):
+--------------------------------------------
+
+PERIOD 9
+Position: RETAILER
+Current inventory: 0 units
+Current backlog: 44 units
+Incoming order: 8 units
+Last order placed: 4 units
+Period cost: $72.00
+Customer demand: 8 units
+Your Recent 5 order(s): [8, 8, 8, 4, 4]
+
+SUPPLY CHAIN VISIBILITY:
+Wholesaler: Inventory=4, Backlog=0, Cost=$8.00
+  Wholesaler recent orders: [8, 8, 8, 8, 8]
+
+PARTNER HISTORY:
+Wholesaler history: ['R5:Inv12,Order8', 'R6:Inv12,Order8', 'R7:Inv12,Order8', 'R8:Inv12,Order8', 'R9:Inv8,Order8']
+
+Consider your recent information when making this decision.
+How many units should you order this period to minimize your total costs?
+
+
+3. FULL VISIBILITY (complete supply chain):
+-------------------------------------------
+
+PERIOD 9
+Position: RETAILER
+Current inventory: 0 units
+Current backlog: 44 units
+Incoming order: 8 units
+Last order placed: 8 units
+Period cost: $72.00
+Customer demand: 8 units
+Your Recent 5 order(s): [8, 8, 8, 8, 8]
+
+SUPPLY CHAIN VISIBILITY:
+Wholesaler: Inventory=20, Backlog=0, Cost=$20.00
+  Wholesaler recent orders: [6, 6, 6, 6, 6]
+Distributor: Inventory=8, Backlog=0, Cost=$10.00
+  Distributor recent orders: [8, 4, 8, 4, 8]
+Manufacturer: Inventory=8, Backlog=0, Cost=$8.00
+  Manufacturer recent orders: [8, 4, 8, 4, 8]
+
+PARTNER HISTORY:
+Wholesaler history: ['R5:Inv20,Order6', 'R6:Inv20,Order6', 'R7:Inv20,Order6', 'R8:Inv20,Order6', 'R9:Inv20,Order6']
+Distributor history: ['R5:Inv18,Order8', 'R6:Inv16,Order4', 'R7:Inv14,Order8', 'R8:Inv12,Order4', 'R9:Inv10,Order8']
+Manufacturer history: ['R5:Inv16,Order8', 'R6:Inv16,Order4', 'R7:Inv12,Order8', 'R8:Inv12,Order4', 'R9:Inv8,Order8']
+
+SYSTEM METRICS:
+Total system cost: $652.00
+Total system inventory: 36 units
+Total system backlog: 44 units
+
+Consider your recent information when making this decision.
+How many units should you order this period to minimize your total costs?
+
